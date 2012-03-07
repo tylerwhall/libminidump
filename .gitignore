@@ -1,0 +1,5 @@
+core
+core.*
+*.o
+segfault
+generate
