@@ -1,4 +1,4 @@
-CFLAGS=-Wextra -Wall -O0 -g -D_GNU_SOURCE
+CFLAGS=-Wextra -Wall -O0 -g -D_GNU_SOURCE -pthread
 
 all: segfault generate core
 
