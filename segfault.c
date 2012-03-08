@@ -14,8 +14,20 @@ static void *hang(void *arg) {
         return NULL;
 }
 
-int main(int argc, char *argv[]) {
+static void crash(void) {
         int *p = 0;
+        *p = 1;
+}
+
+static void b(void) {
+        crash();
+}
+
+static void a(void) {
+        b();
+}
+
+int main(int argc, char *argv[]) {
         struct rlimit rl;
         char path[PATH_MAX];
         unsigned i;
@@ -43,7 +55,7 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
         }
 
-        unlink("coredump");
+        unlink("core");
 
         snprintf(path, sizeof(path), "core.%lu", (unsigned long) getpid());
         path[sizeof(path)-1] = 0;
@@ -53,6 +65,6 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
         }
 
-        *p = 1;
+        a();
         return 0;
 }
