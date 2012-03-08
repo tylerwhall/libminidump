@@ -682,6 +682,30 @@ static int write_proc_file_stream(struct context *c, uint32_t stream_type, const
         return r;
 }
 
+static int write_proc_readlink_stream(struct context *c, uint32_t stream_type, const char *fname) {
+        char *p;
+        int r;
+        char path[PATH_MAX];
+
+        assert(c);
+
+        if (!HAVE_PROCESS(c))
+                return 0;
+
+        if (asprintf(&p, "/proc/%lu/%s", (unsigned long) c->pid, fname) < 0)
+                return -ENOMEM;
+
+        r = readlink(p, path, sizeof(path));
+        free(p);
+
+        if (r < 0)
+                return -errno;
+        if (r == sizeof(path))
+                return -E2BIG;
+
+        return write_blob_stream(c, stream_type, path, r);
+}
+
 static int write_directory(struct context *c) {
         size_t offset;
         struct minidump_header *h;
@@ -726,6 +750,8 @@ static int write_dump(struct context *c) {
         /* write memory list */
         /* write exception */
         /* write system info */
+        /* write rpm info */
+        /* write debug */
 
         /* This is a Ubuntuism, but Google is doing this, hence let's stay compatible here */
         write_file_stream(c, MINIDUMP_LINUX_LSB_RELEASE, "/etc/lsb-release");
@@ -738,6 +764,7 @@ static int write_dump(struct context *c) {
         write_proc_file_stream(c, MINIDUMP_LINUX_CMD_LINE, "cmdline");
         write_proc_file_stream(c, MINIDUMP_LINUX_ENVIRON, "environ");
         write_proc_file_stream(c, MINIDUMP_LINUX_COMM, "comm");
+        write_proc_readlink_stream(c, MINIDUMP_LINUX_EXE, "exe");
 
         r = write_proc_file_stream(c, MINIDUMP_LINUX_MAPS, "maps");
         if (r < 0)
@@ -754,14 +781,10 @@ static int write_dump(struct context *c) {
                 if (r < 0)
                         return r;
 
-                r = write_blob_stream(c, MINIDUMP_LINUX_COREDUMP_EHDR, &c->header, sizeof(c->header));
+                r = write_blob_stream(c, MINIDUMP_LINUX_CORE_EHDR, &c->header, sizeof(c->header));
                 if (r < 0)
                         return r;
         }
-
-        /* write rpm info */
-        /* write /proc/$PID/exe */
-        /* write debug */
 
         r = write_directory(c);
         if (r < 0)

@@ -76,21 +76,21 @@ enum {
         MINIDUMP_ASSERTION_INFO_STREAM        = 0x47670002,
 
         /* Breakpad/Linux extensions */
-        MINIDUMP_LINUX_CPU_INFO               = 0x47670003,
-        MINIDUMP_LINUX_PROC_STATUS            = 0x47670004,
-        MINIDUMP_LINUX_LSB_RELEASE            = 0x47670005,
-        MINIDUMP_LINUX_CMD_LINE               = 0x47670006,
-        MINIDUMP_LINUX_ENVIRON                = 0x47670007,
-        MINIDUMP_LINUX_AUXV                   = 0x47670008,
-        MINIDUMP_LINUX_MAPS                   = 0x47670009,
+        MINIDUMP_LINUX_CPU_INFO               = 0x47670003,  /* done */
+        MINIDUMP_LINUX_PROC_STATUS            = 0x47670004,  /* done */
+        MINIDUMP_LINUX_LSB_RELEASE            = 0x47670005,  /* done */
+        MINIDUMP_LINUX_CMD_LINE               = 0x47670006,  /* done */
+        MINIDUMP_LINUX_ENVIRON                = 0x47670007,  /* done */
+        MINIDUMP_LINUX_AUXV                   = 0x47670008,  /* done */
+        MINIDUMP_LINUX_MAPS                   = 0x47670009,  /* done */
         MINIDUMP_LINUX_DSO_DEBUG              = 0x4767000A,
 
         /* libminidump extensions */
         MINIDUMP_LINUX_OS_RELEASE             = 0x4c500001,
-        MINIDUMP_LINUX_EXE                    = 0x4c500002,
-        MINIDUMP_LINUX_COMM                   = 0x4c500003,
-        MINIDUMP_LINUX_PRPSINFO               = 0x4c500004,
-        MINIDUMP_LINUX_COREDUMP_EHDR          = 0x4c500005
+        MINIDUMP_LINUX_EXE                    = 0x4c500002,  /* done */
+        MINIDUMP_LINUX_COMM                   = 0x4c500003,  /* done */
+        MINIDUMP_LINUX_PRPSINFO               = 0x4c500004,  /* done */
+        MINIDUMP_LINUX_CORE_EHDR              = 0x4c500005   /* done */
 };
 
 
