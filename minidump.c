@@ -15,6 +15,8 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #include <time.h>
+#include <stdarg.h>
+#include <sys/utsname.h>
 
 #include "coredump.h"
 #include "format.h"
@@ -706,6 +708,107 @@ static int write_proc_readlink_stream(struct context *c, uint32_t stream_type, c
         return write_blob_stream(c, stream_type, path, r);
 }
 
+static int append_concat_string(struct context *c, size_t *offset, size_t *size, ...) {
+        va_list ap;
+        bool first = true;
+        size_t sum = 0, o = 0;
+        int r;
+
+        assert(c);
+
+        va_start(ap, size);
+
+        for (;;) {
+                size_t l;
+                const char *p;
+
+                p = va_arg(ap, const char *);
+                if (!p)
+                        break;
+
+                l = strlen(p);
+                r = append_bytes(c, p, l, first ? &o : NULL);
+                if (r < 0)
+                        goto finish;
+
+                sum += l;
+                first = false;
+        }
+
+        r = append_bytes(c, "", 1, first ? &o : NULL);
+        if (r < 0)
+                goto finish;
+
+        sum += 1;
+
+        if (offset)
+                *offset = o;
+
+        if (size)
+                *size = sum;
+
+finish:
+        va_end(ap);
+
+        return r;
+}
+
+static int write_system_info_stream(struct context *c) {
+        struct minidump_system_info i;
+        long l;
+        struct utsname u;
+        int r;
+        size_t offset;
+
+        assert(c);
+
+        memset(&i, 0, sizeof(i));
+
+#if defined(__i386)
+        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_INTEL;
+#elif defined(__mips__)
+        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_MIPS;
+#elif defined(__ppc__)
+        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_PPC;
+#elif defined (__arm__)
+        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_ARM;
+#elif defined (__ia64__)
+        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_IA64;
+#elif defined (__x86_64)
+        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_AMD64;
+#elif defined (__sparc__)
+        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_SPARC;
+#else
+#error "I need porting"
+#endif
+        /* FIXME: i.processor_level = "cpu family"; */
+        /* FIXME: i.processor_revision = "model" << 8 | "stepping"; */
+        /* FIXME: i.cpu.x86_cpu_info.vendor_id = "vendor_id"; */
+
+        i.platform_id =  MINIDUMP_PLATFORM_LINUX;
+
+        l = sysconf(_SC_NPROCESSORS_ONLN);
+        i.number_of_processors = l <= 0 ? 1 : l;
+
+        r = uname(&u);
+        if (r < 0)
+                return -errno;
+
+        r = append_concat_string(c,
+                                 &offset, NULL,
+                                 u.sysname, " ",
+                                 u.release, " ",
+                                 u.version, " ",
+                                 u.machine, " ",
+                                 NULL);
+        if (r < 0)
+                return r;
+
+        i.csd_version_rva = htole32((uint32_t) offset);
+
+        return write_blob_stream(c, MINIDUMP_SYSTEM_INFO_STREAM, &i, sizeof(i));
+}
+
 static int write_directory(struct context *c) {
         size_t offset;
         struct minidump_header *h;
@@ -752,6 +855,8 @@ static int write_dump(struct context *c) {
         /* write system info */
         /* write rpm info */
         /* write debug */
+
+        write_system_info_stream(c);
 
         /* This is a Ubuntuism, but Google is doing this, hence let's stay compatible here */
         write_file_stream(c, MINIDUMP_LINUX_LSB_RELEASE, "/etc/lsb-release");

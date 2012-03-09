@@ -52,11 +52,11 @@ enum {
         MINIDUMP_UNUSED_STREAM                = 0,
         MINIDUMP_RESERVED_STREAM_0            = 1,
         MINIDUMP_RESERVED_STREAM_1            = 2,
-        MINIDUMP_THREAD_LIST_STREAM           = 3,
-        MINIDUMP_MODULE_LIST_STREAM           = 4,
-        MINIDUMP_MEMORY_LIST_STREAM           = 5,
-        MINIDUMP_EXCEPTION_STREAM             = 6,
-        MINIDUMP_SYSTEM_INFO_STREAM           = 7,
+        MINIDUMP_THREAD_LIST_STREAM           = 3,           /* TODO XXXX */
+        MINIDUMP_MODULE_LIST_STREAM           = 4,           /* TODO XXXX */
+        MINIDUMP_MEMORY_LIST_STREAM           = 5,           /* TODO XXXX */
+        MINIDUMP_EXCEPTION_STREAM             = 6,           /* TODO XXXX */
+        MINIDUMP_SYSTEM_INFO_STREAM           = 7,           /* done */
         MINIDUMP_THREAD_EX_LIST_STREAM        = 8,
         MINIDUMP_MEMORY_64_LIST_STREAM        = 9,
         MINIDUMP_COMMENT_STREAM_A             = 10,
@@ -83,7 +83,7 @@ enum {
         MINIDUMP_LINUX_ENVIRON                = 0x47670007,  /* done */
         MINIDUMP_LINUX_AUXV                   = 0x47670008,  /* done */
         MINIDUMP_LINUX_MAPS                   = 0x47670009,  /* done */
-        MINIDUMP_LINUX_DSO_DEBUG              = 0x4767000A,
+        MINIDUMP_LINUX_DSO_DEBUG              = 0x4767000A,  /* TODO XXXX */
 
         /* libminidump extensions */
         MINIDUMP_LINUX_OS_RELEASE             = 0x4c500001,
@@ -91,6 +91,54 @@ enum {
         MINIDUMP_LINUX_COMM                   = 0x4c500003,  /* done */
         MINIDUMP_LINUX_PRPSINFO               = 0x4c500004,  /* done */
         MINIDUMP_LINUX_CORE_EHDR              = 0x4c500005   /* done */
+};
+
+struct minidump_system_info {
+        uint16_t processor_architecture;
+        uint16_t processor_level;
+        uint16_t processor_revision;
+        uint8_t number_of_processors;
+        uint8_t product_type;
+        uint32_t major_version;
+        uint32_t minor_version;
+        uint32_t build_number;
+        uint32_t platform_id;
+        uint32_t csd_version_rva;
+        uint16_t suite_mask;
+        uint16_t reserved2;
+        union {
+                struct {
+                        uint32_t vendor_id[3];
+                        uint32_t version_information;
+                        uint32_t feature_information;
+                        uint32_t amd_extended_cpu_features;
+                } x86_cpu_info;
+                struct {
+                        uint64_t processor_features[2];
+                } other_cpu_info;
+        } cpu;
+};
+
+enum {
+        MINIDUMP_PROCESSOR_ARCHITECTURE_INTEL = 0,
+        MINIDUMP_PROCESSOR_ARCHITECTURE_MIPS = 1,
+        MINIDUMP_PROCESSOR_ARCHITECTURE_PPC = 3,
+        MINIDUMP_PROCESSOR_ARCHITECTURE_ARM = 5,
+        MINIDUMP_PROCESSOR_ARCHITECTURE_IA64 = 6,
+        MINIDUMP_PROCESSOR_ARCHITECTURE_AMD64 = 9,
+
+        /* Breakpad extension */
+        MINIDUMP_PROCESSOR_ARCHITECTURE_SPARC = 0x8001
+};
+
+enum {
+        MINIDUMP_PLATFORM_WIN32S        = 0,
+        MINIDUMP_PLATFORM_WIN32_WINDOWS = 1,
+        MINIDUMP_PLATFORM_WIN32_NT      = 2,
+        MINIDUMP_PLATFORM_WIN32_CE      = 3,
+
+        /* Breakpad extensions */
+        MINIDUMP_PLATFORM_LINUX         = 0x8201
 };
 
 
