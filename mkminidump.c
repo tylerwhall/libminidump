@@ -120,7 +120,7 @@ static int parse_argv(int argc, char *argv[]) {
 }
 
 static int output_and_free(const char *path, void **buffer, size_t *buffer_size) {
-        FILE *f, *toclose;
+        FILE *f, *toclose = NULL;
         int r = 0;
 
         assert(buffer);
@@ -128,10 +128,9 @@ static int output_and_free(const char *path, void **buffer, size_t *buffer_size)
         assert(buffer_size);
         assert(*buffer_size > 0);
 
-        if (!path || strcmp(path, "-") == 0) {
+        if (!path || strcmp(path, "-") == 0)
                 f = stdout;
-                toclose = NULL;
-        } else {
+        else {
                 f = fopen(path, "we");
                 if (!f) {
                         r = -errno;
