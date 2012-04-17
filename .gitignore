@@ -2,4 +2,4 @@ core
 core.*
 *.o
 segfault
-generate
+mkminidump

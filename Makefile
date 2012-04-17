@@ -1,8 +1,8 @@
 CFLAGS=-Wextra -Wall -O0 -g -D_GNU_SOURCE -pthread
 
-all: segfault generate core
+all: segfault mkminidump core
 
-generate: generate.o coredump.h coredump.o minidump.o minidump.h format.h
+mkminidump: mkminidump.o coredump.h coredump.o minidump.o minidump.h format.h
 	$(CC) $(CFLAGS) $(LIBS) $^ -o $@
 
 segfault: segfault.c
@@ -12,4 +12,4 @@ core:	segfault
 	( ./segfault ||: ) > /dev/null 2>&1
 
 clean:
-	rm -f core.* core segfault generate
+	rm -f core.* core segfault mkminidump

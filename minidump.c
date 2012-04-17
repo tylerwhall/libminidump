@@ -794,6 +794,7 @@ static int add_mapping(struct context *c, unsigned long start, unsigned long end
         c->maps[j].extent.address = start;
         c->maps[j].extent.size = (size_t) (end - start);
         c->maps[j].name = name ? strdup(name) : NULL;
+        c->maps[j].build_id = NULL;
 
         if (name)
                 fprintf(stderr, "Added mapping %u address=0x%lx size=0x%lx name=%s\n", j, c->maps[j].extent.address, c->maps[j].extent.size, name);
@@ -1602,6 +1603,8 @@ static int write_minidump(struct context *c) {
 
 static int write_minicore(struct context *c) {
         assert(c);
+
+        /* FIXME */
 
         return 0;
 }
