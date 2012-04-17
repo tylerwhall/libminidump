@@ -1840,9 +1840,17 @@ static void context_release(struct context *c) {
                 detach_threads(c);
 
         free(c->auxv.data);
-        for (j = 0; j < c->n_maps; j++)
+        for (j = 0; j < c->n_maps; j++) {
                 free(c->maps[j].name);
+                free(c->maps[j].build_id);
+        }
+        for (j = 0; j < c->n_write_maps; j++) {
+                free(c->write_maps[j].name);
+                free(c->write_maps[j].build_id);
+        }
+
         free(c->maps);
+        free(c->write_maps);
         free(c->threads);
         free(c->output);
         free(c->proc_maps.data);
