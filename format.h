@@ -90,10 +90,11 @@ enum {
         MINIDUMP_LINUX_EXE                    = 0x4c500002,  /* done */
         MINIDUMP_LINUX_COMM                   = 0x4c500003,  /* done */
         MINIDUMP_LINUX_PRPSINFO               = 0x4c500004,  /* done */
-        MINIDUMP_LINUX_CORE_EHDR              = 0x4c500005   /* done */
+        MINIDUMP_LINUX_CORE_EHDR              = 0x4c500005,  /* done */
+        MINIDUMP_LINUX_ATTR_CURRENT           = 0x4c500006,  /* done */
 };
 
-struct minidump_system_info {
+__attribute__((packed)) struct minidump_system_info {
         uint16_t processor_architecture;
         uint16_t processor_level;
         uint16_t processor_revision;
@@ -141,5 +142,194 @@ enum {
         MINIDUMP_PLATFORM_LINUX         = 0x8201
 };
 
+__attribute__((packed)) struct minidump_vs_fixed_file_info {
+        uint32_t signature;
+        uint32_t struct_version;
+        uint32_t file_version_hi;
+        uint32_t file_version_lo;
+        uint32_t product_version_hi;
+        uint32_t product_version_lo;
+        uint32_t file_flags_mask;    /* Identifies valid bits in fileFlags */
+        uint32_t file_flags;
+        uint32_t file_os;
+        uint32_t file_type;
+        uint32_t file_subtype;
+        uint32_t file_date_hi;
+        uint32_t file_date_lo;
+};
+
+__attribute__((packed)) struct minidump_module {
+        uint64_t base_of_image;
+        uint32_t size_of_image;
+        uint32_t check_sum;
+        uint32_t time_date_stamp;
+        uint32_t module_name_rva;
+        struct minidump_vs_fixed_file_info version_info;
+        struct minidump_location_descriptor cv_record;
+        struct minidump_location_descriptor misc_record;
+        uint64_t reserved0;
+        uint64_t reserved1;
+};
+
+__attribute__((packed)) struct minidump_module_list {
+        uint32_t number_of_modules;
+        struct minidump_module modules[];
+};
+
+__attribute__((packed)) struct minidump_memory_descriptor{
+        uint64_t start_of_memory_range;
+        struct minidump_location_descriptor memory;
+};
+
+__attribute__((packed)) struct minidump_thread {
+        uint32_t thread_id;
+        uint32_t suspend_count;
+        uint32_t priority_class;
+        uint32_t priority;
+        uint64_t teb;
+        struct minidump_location_descriptor thread_context;
+        struct minidump_memory_descriptor stack;
+};
+
+__attribute__((packed)) struct minidump_thread_list {
+        uint32_t number_of_threads;
+        struct minidump_thread threads[];
+};
+
+__attribute__((packed)) struct minidump_memory_list {
+        uint32_t number_of_memory_ranges;
+        struct minidump_memory_descriptor memory_ranges[];
+};
+
+__attribute__((packed)) struct minidump_exception {
+        uint32_t exception_code;
+        uint32_t exception_flags;
+        uint64_t exception_record;
+        uint64_t exception_address;
+        uint32_t number_parameters;
+        uint32_t _alignment;
+        uint64_t exception_information[15];
+};
+
+__attribute__((packed)) struct minidump_exception_stream {
+        uint32_t thread_id;
+        uint32_t _alignment;
+        struct minidump_exception exception_record;
+        struct minidump_location_descriptor thread_context;
+};
+
+__attribute__((packed)) struct minidump_xmm_save_area32_amd64 {
+        uint16_t control_word;
+        uint16_t status_word;
+        uint8_t tag_word;
+        uint8_t reserved1;
+        uint16_t error_opcode;
+        uint32_t error_offset;
+        uint16_t error_selector;
+        uint16_t reserved2;
+        uint32_t data_offset;
+        uint16_t data_selector;
+        uint16_t reserved3;
+        uint32_t mx_csr;
+        uint32_t mx_csr_mask;
+        __uint128_t float_registers[8];
+        __uint128_t xmm_registers[16];
+        uint8_t reserved4[96];
+};
+
+__attribute__((packed)) struct minidump_context_amd64 {
+        uint64_t  p1_home;
+        uint64_t  p2_home;
+        uint64_t  p3_home;
+        uint64_t  p4_home;
+        uint64_t  p5_home;
+        uint64_t  p6_home;
+        uint32_t  context_flags;
+        uint32_t  mx_csr;
+
+        uint16_t  cs;
+        uint16_t  ds;
+        uint16_t  es;
+        uint16_t  fs;
+        uint16_t  gs;
+        uint16_t  ss;
+        uint32_t  eflags;
+        uint64_t  dr0;
+        uint64_t  dr1;
+        uint64_t  dr2;
+        uint64_t  dr3;
+        uint64_t  dr6;
+        uint64_t  dr7;
+        uint64_t  rax;
+        uint64_t  rcx;
+        uint64_t  rdx;
+        uint64_t  rbx;
+        uint64_t  rsp;
+        uint64_t  rbp;
+        uint64_t  rsi;
+        uint64_t  rdi;
+        uint64_t  r8;
+        uint64_t  r9;
+        uint64_t  r10;
+        uint64_t  r11;
+        uint64_t  r12;
+        uint64_t  r13;
+        uint64_t  r14;
+        uint64_t  r15;
+        uint64_t  rip;
+
+        union {
+                struct minidump_xmm_save_area32_amd64 flt_save;
+                struct {
+                        __uint128_t header[2];
+                        __uint128_t legacy[8];
+                        __uint128_t xmm0;
+                        __uint128_t xmm1;
+                        __uint128_t xmm2;
+                        __uint128_t xmm3;
+                        __uint128_t xmm4;
+                        __uint128_t xmm5;
+                        __uint128_t xmm6;
+                        __uint128_t xmm7;
+                        __uint128_t xmm8;
+                        __uint128_t xmm9;
+                        __uint128_t xmm10;
+                        __uint128_t xmm11;
+                        __uint128_t xmm12;
+                        __uint128_t xmm13;
+                        __uint128_t xmm14;
+                        __uint128_t xmm15;
+                } sse_registers;
+        };
+
+        __uint128_t vector_register[26];
+        uint64_t vector_control;
+        uint64_t debug_control;
+        uint64_t last_branch_to_rip;
+        uint64_t last_branch_from_rip;
+        uint64_t last_exception_to_rip;
+        uint64_t last_exception_from_rip;
+};
+
+enum {
+        MINIDUMP_CONTEXT_AMD64 = 0x00100000,
+        MINIDUMP_CONTEXT_AMD64_CONTROL = (MINIDUMP_CONTEXT_AMD64 | 0x00000001),
+        MINIDUMP_CONTEXT_AMD64_INTEGER = (MINIDUMP_CONTEXT_AMD64 | 0x00000002),
+        MINIDUMP_CONTEXT_AMD64_SEGMENTS = (MINIDUMP_CONTEXT_AMD64 | 0x00000004),
+        MINIDUMP_CONTEXT_AMD64_FLOATING_POINT = (MINIDUMP_CONTEXT_AMD64 | 0x00000008),
+        MINIDUMP_CONTEXT_AMD64_DEBUG_REGISTERS = (MINIDUMP_CONTEXT_AMD64 | 0x00000010),
+        MINIDUMP_CONTEXT_AMD64_XSTATE = (MINIDUMP_CONTEXT_AMD64 | 0x00000040),
+        MINIDUMP_CONTEXT_AMD64_FULL = (MINIDUMP_CONTEXT_AMD64_CONTROL |
+                                       MINIDUMP_CONTEXT_AMD64_INTEGER |
+                                       MINIDUMP_CONTEXT_AMD64_FLOATING_POINT),
+        MINIDUMP_CONTEXT_AMD64_ALL = (MINIDUMP_CONTEXT_AMD64_FULL |
+                                      MINIDUMP_CONTEXT_AMD64_SEGMENTS |
+                                      MINIDUMP_CONTEXT_AMD64_DEBUG_REGISTERS)
+};
+
+__attribute__((packed)) struct minidump_string {
+        uint32_t length;
+        uint16_t buffer[];
+};
 
 #endif

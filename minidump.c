@@ -17,16 +17,39 @@
 #include <time.h>
 #include <stdarg.h>
 #include <sys/utsname.h>
+#include <stddef.h>
 
 #include "coredump.h"
 #include "format.h"
 #include "minidump.h"
 
 #define MINIDUMP_STREAMS_MAX 17
+#define CODE_SAVE_SIZE 256
+#define STACK_SAVE_SIZE (32*1024)
+
+struct buffer {
+        char *data;
+        size_t size;
+};
+
+struct extent {
+        unsigned long address;
+        size_t size;
+};
+
+struct map_info {
+        struct extent extent;
+        char *name;
+        char *build_id;
+
+        size_t minidump_offset;
+};
 
 struct thread_info {
         pid_t tid;
         unsigned long stack_pointer;
+        unsigned long instruction_pointer;
+        char *name;
 
         struct elf_prstatus prstatus;         /* only available on coredumps */
         siginfo_t siginfo;                    /* only available on ptrace */
@@ -41,24 +64,68 @@ struct thread_info {
 
 struct context {
         pid_t pid;
-        int fd;
+        int coredump_fd;
+        int minidump_fd;
 
         ElfW(Ehdr) header;                    /* only available on coredumps */
         struct elf_prpsinfo prpsinfo;         /* only available on coredumps */
-        ElfW(auxv_t) *auxv;
-        size_t auxv_size;
 
-        void *minidump;
-        size_t minidump_size;
-        size_t minidump_allocated;
-        size_t ninidump_offset;
+        struct buffer auxv;
 
+        /* The total maps we know of */
+        struct map_info *maps;
+        unsigned n_maps;
+        unsigned allocated_maps;
+
+        /* The subset we know off */
+        struct map_info *write_maps;
+        unsigned n_write_maps;
+
+        struct thread_info *threads;
+        unsigned n_threads;
+        unsigned allocated_threads;
+
+        /* Data from /proc */
+        struct buffer proc_maps;
+        struct buffer proc_status;
+        struct buffer proc_environ;
+        struct buffer proc_cmdline;
+        struct buffer proc_comm;
+        struct buffer proc_attr_current;
+        struct buffer proc_exe;
+
+        /* system data */
+        struct buffer proc_cpuinfo;
+        struct buffer lsb_release;
+        struct buffer os_release;
+
+        void *output;
+        size_t output_size;
+        size_t output_allocated;
+        size_t output_offset;
+
+        /* This is needed while writing a minidump */
         struct minidump_directory minidump_directory[MINIDUMP_STREAMS_MAX];
         uint32_t minidump_n_streams;
+
 };
 
 #define HAVE_PROCESS(c) ((c)->pid > 0)
-#define HAVE_COREDUMP(c) ((c)->fd >= 0)
+#define HAVE_COREDUMP(c) ((c)->coredump_fd >= 0)
+#define HAVE_MINIDUMP(c) ((c)->minidump_fd >= 0)
+
+static void* memdup(const void *p, size_t l) {
+        void *r;
+
+        assert(p);
+
+        r = malloc(l);
+        if (!r)
+                return NULL;
+
+        memcpy(r, p, l);
+        return r;
+}
 
 static int threads_begin(pid_t pid, DIR **_d) {
         char *path;
@@ -292,31 +359,142 @@ static int ptrace_copy(enum __ptrace_request req, pid_t pid, unsigned long sourc
         return 0;
 }
 
+static int minidump_read_memory(struct context *c, unsigned long source, void *destination, size_t length) {
+        assert(c);
+        assert(destination);
+        assert(length > 0);
+        assert(c->minidump_fd >= 0);
+
+        return -ENOTSUP;
+}
+
 static int read_memory(struct context *c, unsigned long source, void *destination, size_t length) {
+        int r;
+
         assert(c);
         assert(destination);
         assert(length > 0);
 
-        if (HAVE_COREDUMP(c))
-                return coredump_read_memory(c->fd, &c->header, source, destination, length);
+        if (HAVE_COREDUMP(c)) {
+                r = coredump_read_memory(c->coredump_fd, &c->header, source, destination, length);
 
-        return ptrace_copy(PTRACE_PEEKDATA, c->pid, source, destination, length);
+                if (r != 0)
+                        return r;
+        }
+
+        if (HAVE_MINIDUMP(c)) {
+                r = minidump_read_memory(c, source, destination, length);
+
+                if (r != 0)
+                        return r;
+        }
+
+        if (HAVE_PROCESS(c))
+                return ptrace_copy(PTRACE_PEEKDATA, c->pid, source, destination, length);
+
+        return 0;
 }
 
-static int proc_read_auxv(struct context *c) {
-        int r;
+static int proc_read_buffer(const char *path, struct buffer *b) {
+        assert(path);
+        assert(b);
+
+        if (b->data)
+                return 0;
+
+        return read_full_file(path, (void**) &b->data, &b->size);
+}
+
+static int proc_read_pid_buffer(pid_t pid, const char *field, struct buffer *b) {
         char *p;
+        int r;
 
-        assert(c);
+        assert(pid > 0);
+        assert(field);
+        assert(b);
 
-        if (asprintf(&p, "/proc/%lu/auxv", (unsigned long) c->pid) < 0)
+        if (asprintf(&p, "/proc/%lu/%s", (unsigned long) pid, field) < 0)
                 return -ENOMEM;
 
-        r = read_full_file(p, (void**) &c->auxv, &c->auxv_size);
+        r = proc_read_buffer(p, b);
         free(p);
 
         return r;
 }
+
+static int proc_readlink_pid_buffer(pid_t pid, const char *field, struct buffer *b) {
+        char path[PATH_MAX];
+        char *p;
+        int r;
+
+        assert(pid > 0);
+        assert(b);
+
+        if (b->data)
+                return 0;
+
+        if (asprintf(&p, "/proc/%lu/%s", (unsigned long) pid, field) < 0)
+                return -ENOMEM;
+
+        r = readlink(p, path, sizeof(path));
+        free(p);
+
+        if (r == 0)
+                return 0;
+        if (r < 0)
+                return -errno;
+        if (r == sizeof(path))
+                return -E2BIG;
+
+        p = memdup(path, r);
+        if (!p)
+                return -ENOMEM;
+
+        b->data = p;
+        b->size = r;
+
+        return 0;
+}
+
+static int add_thread(struct context *c, struct thread_info *i) {
+        unsigned j;
+
+        assert(c);
+
+#if defined(__i386)
+        i->stack_pointer = (unsigned long) i->regs.esp;
+        i->instruction_pointer = (unsigned long) i->regs.eip;
+#elif defined(__x86_64)
+        i->stack_pointer = (unsigned long) i->regs.rsp;
+        i->instruction_pointer = (unsigned long) i->regs.rip;
+#else
+#error "I need porting to your architecture"
+#endif
+
+        if (c->n_threads >= c->allocated_threads) {
+                struct thread_info *t;
+                unsigned k;
+
+                k = MAX(8, c->n_threads * 2);
+                t = realloc(c->threads, sizeof(struct thread_info) * k);
+                if (!t)
+                        return -errno;
+
+                c->allocated_threads = k;
+                c->threads = t;
+        }
+
+        j = c->n_threads++;
+        c->threads[j] = *i;
+
+        fprintf(stderr, "Added thread %u tid=%lu sp=%0lx ip=%0lx\n",
+                j,
+                (unsigned long) i->tid,
+                (unsigned long) i->stack_pointer,
+                (unsigned long) i->instruction_pointer);
+        return 0;
+}
+
 
 static int read_thread_info_ptrace(struct context *c, pid_t tid, struct thread_info *i) {
         int r;
@@ -339,6 +517,9 @@ static int read_thread_info_ptrace(struct context *c, pid_t tid, struct thread_i
         if (r < 0)
                 return r;
 
+        /* Note: Asking the kernel for NT_PRSTATUS will actually give
+         * us only the regs, not the full prstatus. The kernel is a
+         * bit surprising sometimes. */
         iovec.iov_base = &i->regs;
         iovec.iov_len = sizeof(i->regs);
         r = ptrace(PTRACE_GETREGSET, tid, NT_PRSTATUS, &iovec);
@@ -368,23 +549,7 @@ static int read_thread_info_ptrace(struct context *c, pid_t tid, struct thread_i
         return 0;
 }
 
-static int work_thread_info(struct context *c, struct thread_info *i) {
-        assert(c);
-        assert(i);
-
-#if defined(__i386)
-        i->stack_pointer = (unsigned long) i->regs.esp;
-#elif defined(__x86_64)
-        i->stack_pointer = (unsigned long) i->regs.rsp;
-#else
-#error "I need porting to your architecture"
-#endif
-
-        fprintf(stderr, "thread %lu (sp=%0lx)\n", (unsigned long) i->tid, (unsigned long) i->stack_pointer);
-        return 0;
-}
-
-static int foreach_thread_ptrace(struct context *c) {
+static int proc_read_threads(struct context *c) {
         DIR *d = NULL;
         int r;
 
@@ -410,9 +575,11 @@ static int foreach_thread_ptrace(struct context *c) {
                 if (r < 0)
                         goto finish;
 
-                r = work_thread_info(c, &i);
+                r = add_thread(c, &i);
                 if (r < 0)
                         goto finish;
+
+                /* FIXME: read name */
         }
 
         r = 0;
@@ -424,7 +591,7 @@ finish:
         return r;
 }
 
-static int foreach_thread_core(struct context *c) {
+static int coredump_read_threads(struct context *c) {
         off_t offset, length;
         int r;
         struct thread_info i;
@@ -435,7 +602,7 @@ static int foreach_thread_core(struct context *c) {
         assert(c);
         assert(HAVE_COREDUMP(c));
 
-        r = coredump_find_note_segment(c->fd, &c->header, &offset, &length);
+        r = coredump_find_note_segment(c->coredump_fd, &c->header, &offset, &length);
         if (r < 0)
                 return r;
         if (r == 0)
@@ -449,14 +616,14 @@ static int foreach_thread_core(struct context *c) {
                 ssize_t l;
                 ElfW(Nhdr) note;
 
-                r = coredump_next_note(c->fd, &offset, &length, &note, &name_offset, &descriptor_offset);
+                r = coredump_next_note(c->coredump_fd, &offset, &length, &note, &name_offset, &descriptor_offset);
                 if (r < 0)
                         return r;
 
                 if (note.n_namesz >= sizeof(name))
                         continue;
 
-                l = pread(c->fd, name, note.n_namesz, name_offset);
+                l = pread(c->coredump_fd, name, note.n_namesz, name_offset);
                 if (l < 0)
                         return -errno;
                 if (l != note.n_namesz)
@@ -471,7 +638,7 @@ static int foreach_thread_core(struct context *c) {
                                 if (!found_prstatus || !found_fpregset)
                                         return -EIO;
 
-                                work_thread_info(c, &i);
+                                add_thread(c, &i);
                         }
 
                         memset(&i, 0, sizeof(i));
@@ -482,7 +649,7 @@ static int foreach_thread_core(struct context *c) {
                         if (note.n_descsz != sizeof(i.prstatus))
                                 return -EIO;
 
-                        l = pread(c->fd, &i.prstatus, sizeof(i.prstatus), descriptor_offset);
+                        l = pread(c->coredump_fd, &i.prstatus, sizeof(i.prstatus), descriptor_offset);
                         if (l < 0)
                                 return -errno;
                         if (l != sizeof(i.prstatus))
@@ -502,7 +669,7 @@ static int foreach_thread_core(struct context *c) {
                         if (note.n_descsz != sizeof(c->prpsinfo))
                                 return -EIO;
 
-                        l = pread(c->fd, &c->prpsinfo, sizeof(c->prpsinfo), descriptor_offset);
+                        l = pread(c->coredump_fd, &c->prpsinfo, sizeof(c->prpsinfo), descriptor_offset);
                         if (l < 0)
                                 return -errno;
                         if (l != sizeof(c->prpsinfo))
@@ -516,17 +683,18 @@ static int foreach_thread_core(struct context *c) {
 
                         found_auxv = true;
 
-                        c->auxv = malloc(note.n_descsz);
-                        if (!c->auxv)
+                        free(c->auxv.data);
+                        c->auxv.data = malloc(note.n_descsz);
+                        if (!c->auxv.data)
                                 return -ENOMEM;
 
-                        l = pread(c->fd, c->auxv, note.n_descsz, descriptor_offset);
+                        l = pread(c->coredump_fd, c->auxv.data, note.n_descsz, descriptor_offset);
                         if (l < 0)
                                 return -errno;
                         if (l != note.n_descsz)
                                 return -EIO;
 
-                        c->auxv_size = note.n_descsz;
+                        c->auxv.size = note.n_descsz;
 
                 } else if (strcmp(name, "CORE") == 0 &&
                            note.n_type == NT_FPREGSET) {
@@ -539,7 +707,7 @@ static int foreach_thread_core(struct context *c) {
                         if (note.n_descsz != sizeof(i.fpregs))
                                 return -EIO;
 
-                        l = pread(c->fd, &i.fpregs, sizeof(i.fpregs), descriptor_offset);
+                        l = pread(c->coredump_fd, &i.fpregs, sizeof(i.fpregs), descriptor_offset);
                         if (l < 0)
                                 return -errno;
                         if (l != sizeof(i.fpregs))
@@ -564,7 +732,7 @@ static int foreach_thread_core(struct context *c) {
                 if (!found_prstatus || !found_fpregset)
                         return -EIO;
 
-                work_thread_info(c, &i);
+                add_thread(c, &i);
         }
 
         if (!found_prpsinfo || !found_auxv)
@@ -573,42 +741,364 @@ static int foreach_thread_core(struct context *c) {
         return 0;
 }
 
-static int foreach_thread(struct context *c) {
+static int add_mapping(struct context *c, unsigned long start, unsigned long end, const char *name) {
+        unsigned j;
+
+        assert(c);
+        assert(end >= start);
+
+        if (c->n_maps >= c->allocated_maps) {
+                struct map_info *m;
+                unsigned k;
+
+                k = MAX(64, c->n_maps * 2);
+                m = realloc(c->maps, sizeof(struct map_info) * k);
+                if (!m)
+                        return -errno;
+
+                c->allocated_maps = k;
+                c->maps = m;
+        }
+
+        j = c->n_maps++;
+
+        c->maps[j].extent.address = start;
+        c->maps[j].extent.size = (size_t) (end - start);
+        c->maps[j].name = name ? strdup(name) : NULL;
+
+        if (name)
+                fprintf(stderr, "Added mapping %u address=0x%lx size=0x%lx name=%s\n", j, c->maps[j].extent.address, c->maps[j].extent.size, name);
+        else
+                fprintf(stderr, "Added mapping %u address=0x%lx size=0x%lx\n", j, c->maps[j].extent.address, c->maps[j].extent.size);
+
+        return 0;
+}
+
+static int proc_read_maps(struct context *c) {
+        char *p;
+        FILE *f;
+        int r;
+
+        assert(c);
+        assert(HAVE_PROCESS(c));
+
+        if (asprintf(&p, "/proc/%lu/maps", (unsigned long) c->pid) < 0)
+                return -ENOMEM;
+
+        f = fopen(p, "re");
+        free(p);
+
+        if (!f)
+                return -errno;
+
+        while (!feof(f)) {
+                int k;
+                char line[LINE_MAX];
+                unsigned long start, end;
+                int j;
+
+                if (!fgets(line, sizeof(line), f)) {
+                        if (ferror(f)) {
+                                r = -errno;
+                                goto finish;
+                        }
+
+                        break;
+                }
+
+                line[strcspn(line, "\n\r")] = 0;
+
+                k = sscanf(line, "%lx-%lx %*s %*x %*x:%*x %*u %n", &start, &end, &j);
+                if (k != 2) {
+                        r = -EIO;
+                        break;
+                }
+
+                r = add_mapping(c, start, end, line[j] == 0 ? NULL : line + j);
+                if (r < 0)
+                        goto finish;
+        }
+
+        r = 0;
+
+finish:
+        if (f)
+                fclose(f);
+
+        return r;
+}
+
+static struct map_info *find_map_info(struct map_info *m, unsigned n, unsigned long address) {
+        unsigned j;
+
+        assert(m);
+
+        for (j = 0; j < n; j++) {
+
+                if (address < m[j].extent.address)
+                        continue;
+
+                if (address >= m[j].extent.address + m[j].extent.size)
+                        continue;
+
+                return m + j;
+        }
+
+        return NULL;
+}
+
+static int coredump_read_maps(struct context *c) {
+        unsigned long i;
+        int r;
+
+        assert(c);
+        assert(HAVE_COREDUMP(c));
+
+        for (i = 0; i < c->header.e_phnum; i++) {
+                ElfW(Phdr) segment;
+
+                r = coredump_read_segment_header(c->coredump_fd, &c->header, i, &segment);
+                if (r < 0)
+                        return r;
+
+                if (segment.p_type != PT_LOAD)
+                        continue;
+
+                r = add_mapping(c, segment.p_vaddr, segment.p_vaddr+segment.p_filesz, NULL);
+                if (r < 0)
+                        return r;
+        }
+
+        return 0;
+}
+
+static int pick_maps(struct context *c) {
+        unsigned i;
+
         assert(c);
 
-        if (HAVE_COREDUMP(c))
-                return foreach_thread_core(c);
+        c->n_write_maps = c->n_threads * 2;
+        c->write_maps = malloc(sizeof(struct map_info) * c->n_write_maps);
 
-        return foreach_thread_ptrace(c);
+        if (!c->write_maps)
+                return -ENOMEM;
+
+        memset(c->write_maps, 0, sizeof(struct map_info) * c->n_write_maps);
+
+        for (i = 0; i < c->n_threads; i++) {
+                struct thread_info *t;
+                struct map_info *m;
+
+                t = c->threads + i;
+                m = c->write_maps + i * 2;
+
+                if (t->instruction_pointer > CODE_SAVE_SIZE/2)
+                        m[0].extent.address = t->instruction_pointer - CODE_SAVE_SIZE/2;
+                else
+                        m[0].extent.address = 0;
+                m[0].extent.size = CODE_SAVE_SIZE;
+
+                m[1].extent.address = t->stack_pointer;
+                m[1].extent.size = STACK_SAVE_SIZE;
+        }
+
+        return 0;
+}
+
+static bool extents_overlap(struct extent *a, struct extent *b) {
+        assert(a);
+        assert(b);
+
+        return (a->address <= b->address + b->size) &&
+                (a->address + a->size >= b->address);
+}
+
+static bool maps_merge(struct map_info *d, struct map_info *a, struct map_info *b) {
+        unsigned long start, end;
+
+        assert(a);
+        assert(b);
+
+        assert(!a->name);
+        assert(!b->name);
+        assert(!a->build_id);
+        assert(!b->build_id);
+
+        if (!extents_overlap(&a->extent, &b->extent))
+                return false;
+
+        start = MIN(a->extent.address, b->extent.address);
+        end = MAX(a->extent.address + a->extent.size, b->extent.address + b->extent.size);
+
+        fprintf(stderr, "Merging %lx|%lx=%lx %lu|%lu=%lu\n",
+                (unsigned long) a->extent.address,
+                (unsigned long) b->extent.address,
+                (unsigned long) start,
+                (unsigned long) a->extent.size,
+                (unsigned long) b->extent.size,
+                (unsigned long) (end - start));
+
+        d->extent.address = start;
+        d->extent.size = end - start;
+
+
+        d->name = d->build_id = NULL;
+
+        return true;
+}
+
+static int merge_maps(struct context *c) {
+        bool merged;
+
+        assert(c);
+
+        /* Merge overlapping maps into one */
+
+        do {
+                unsigned i, j;
+
+                merged = false;
+
+                for (i = 0; i < c->n_write_maps; i++) {
+                        for (j = i + 1; j < c->n_write_maps; j++)
+                                if (maps_merge(c->write_maps+i, c->write_maps+i, c->write_maps+j)) {
+                                        memmove(c->write_maps+j, c->write_maps+j+1,
+                                                sizeof(struct map_info) * (c->n_write_maps-j-1));
+                                        c->n_write_maps--;
+                                        merged = true;
+                                        break;
+                                }
+
+                        if (merged)
+                                break;
+                }
+
+        } while (merged);
+
+        return 0;
+}
+
+static bool maps_add(struct map_info *d, struct map_info *a, struct map_info *b) {
+        unsigned long start, end;
+
+        /* Masks a against b, and stores it in d */
+
+        assert(!a->name);
+        assert(!a->build_id);
+
+        if (!extents_overlap(&a->extent, &b->extent))
+                return false;
+
+        start = MAX(a->extent.address, b->extent.address);
+        end = MIN(a->extent.address + a->extent.size, b->extent.address + b->extent.size);
+
+        d->extent.address = start;
+        d->extent.size = end - start;
+
+        d->name = b->name ? strdup(b->name) : NULL;
+        d->build_id = b->build_id ? strdup(b->build_id) : NULL;
+
+        return true;
+}
+
+static int mask_maps(struct context *c) {
+        unsigned i, j;
+        unsigned n_result = 0;
+        struct map_info *result;
+
+        assert(c);
+
+        /* Split maps we write along the chunks of the maps we read */
+
+        result = malloc(sizeof(struct map_info)*(c->n_write_maps + c->n_maps));
+
+        if (!result)
+                return -ENOMEM;
+
+        for (i = 0; i < c->n_write_maps; i ++)
+                for (j = 0; j < c->n_maps; j ++)
+                        if (maps_add(result+n_result, c->write_maps+i, c->maps+j))
+                                n_result++;
+
+        free(c->write_maps);
+        c->write_maps = result;
+        c->n_write_maps = n_result;
+
+        return 0;
+}
+
+static int reserve_bytes(struct context *c, size_t bytes, void **ptr, size_t *offset) {
+        assert(c);
+
+        if (c->output_size + bytes > c->output_allocated) {
+                size_t l;
+                void *p;
+
+                l = (c->output_size + bytes) * 2;
+                if (l < 4096)
+                        l = 4096;
+
+                p = realloc(c->output, l);
+                if (!p)
+                        return -ENOMEM;
+
+                c->output = p;
+                c->output_allocated = l;
+        }
+
+        *ptr = (uint8_t*) c->output + c->output_size;
+
+        if (offset)
+                *offset = c->output_size;
+
+        c->output_size += bytes;
+        return 0;
 }
 
 static int append_bytes(struct context *c, const void *data, size_t bytes, size_t *offset) {
         void *p;
+        int r;
 
         assert(c);
 
-        if (c->minidump_size + bytes > c->minidump_allocated) {
-                size_t l;
+        r = reserve_bytes(c, bytes, &p, offset);
+        if (r < 0)
+                return r;
 
-                l = (c->minidump_size + bytes) * 2;
-                if (l < 4096)
-                        l = 4096;
+        memcpy(p, data, bytes);
+        return r;
+}
 
-                p = realloc(c->minidump, l);
-                if (!p)
-                        return -ENOMEM;
+static int write_string(struct context *c, const char *s, size_t *offset) {
+        size_t n, l;
+        struct minidump_string h;
+        unsigned i;
+        int r;
+        void *p;
 
-                c->minidump = p;
-                c->minidump_allocated = l;
+        assert(c);
+        assert(s);
+
+        l = strlen(s);
+        n = offsetof(struct minidump_string, buffer) + l*2;
+
+        r = reserve_bytes(c, n, &p, offset);
+        if (r < 0)
+                return r;
+
+        memset(&h, 0, sizeof(h));
+        h.length = htole32(l*2);
+        memcpy(p, &h, offsetof(struct minidump_string, buffer));
+
+        for (i = 0; i < l; i++) {
+                uint16_t le;
+
+                /* We just care about ASCII, so the conversion to UTF16 is trivial */
+
+                le = htole16(s[i]);
+                memcpy(h.buffer + i, &le, 2);
         }
 
-        p = (uint8_t*) c->minidump + c->minidump_size;
-        memcpy(p, data, bytes);
-
-        if (offset)
-                *offset = c->minidump_size;
-
-        c->minidump_size += bytes;
         return 0;
 }
 
@@ -648,64 +1138,14 @@ static int write_blob_stream(struct context *c, uint32_t stream_type, const void
         return r;
 }
 
-static int write_file_stream(struct context *c, uint32_t stream_type, const char *path) {
-        int r;
-        char *buffer = NULL;
-        size_t size = 0;
-
+static int write_buffer_stream(struct context *c, uint32_t stream_type, const struct buffer *buffer) {
         assert(c);
-        assert(path);
+        assert(buffer);
 
-        r = read_full_file(path, (void**) &buffer, &size);
-        if (r < 0)
-                return r;
-
-        r = write_blob_stream(c, stream_type, buffer, size);
-        free(buffer);
-
-        return r;
-}
-
-static int write_proc_file_stream(struct context *c, uint32_t stream_type, const char *fname) {
-        char *p;
-        int r;
-
-        assert(c);
-
-        if (!HAVE_PROCESS(c))
+        if (!buffer->data)
                 return 0;
 
-        if (asprintf(&p, "/proc/%lu/%s", (unsigned long) c->pid, fname) < 0)
-                return -ENOMEM;
-
-        r = write_file_stream(c, stream_type, p);
-        free(p);
-
-        return r;
-}
-
-static int write_proc_readlink_stream(struct context *c, uint32_t stream_type, const char *fname) {
-        char *p;
-        int r;
-        char path[PATH_MAX];
-
-        assert(c);
-
-        if (!HAVE_PROCESS(c))
-                return 0;
-
-        if (asprintf(&p, "/proc/%lu/%s", (unsigned long) c->pid, fname) < 0)
-                return -ENOMEM;
-
-        r = readlink(p, path, sizeof(path));
-        free(p);
-
-        if (r < 0)
-                return -errno;
-        if (r == sizeof(path))
-                return -E2BIG;
-
-        return write_blob_stream(c, stream_type, path, r);
+        return write_blob_stream(c, stream_type, buffer->data, buffer->size);
 }
 
 static int append_concat_string(struct context *c, size_t *offset, size_t *size, ...) {
@@ -764,28 +1204,25 @@ static int write_system_info_stream(struct context *c) {
 
         memset(&i, 0, sizeof(i));
 
+        i.platform_id = htole32(MINIDUMP_PLATFORM_LINUX);
+
 #if defined(__i386)
-        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_INTEL;
+        i.processor_architecture = htole16(MINIDUMP_PROCESSOR_ARCHITECTURE_INTEL);
 #elif defined(__mips__)
-        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_MIPS;
+        i.processor_architecture = htole16(MINIDUMP_PROCESSOR_ARCHITECTURE_MIPS);
 #elif defined(__ppc__)
-        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_PPC;
+        i.processor_architecture = htole16(MINIDUMP_PROCESSOR_ARCHITECTURE_PPC);
 #elif defined (__arm__)
-        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_ARM;
+        i.processor_architecture = htole16(MINIDUMP_PROCESSOR_ARCHITECTURE_ARM);
 #elif defined (__ia64__)
-        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_IA64;
+        i.processor_architecture = htole16(MINIDUMP_PROCESSOR_ARCHITECTURE_IA64);
 #elif defined (__x86_64)
-        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_AMD64;
+        i.processor_architecture = htole16(MINIDUMP_PROCESSOR_ARCHITECTURE_AMD64);
 #elif defined (__sparc__)
-        i.processor_architecture = MINIDUMP_PROCESSOR_ARCHITECTURE_SPARC;
+        i.processor_architecture = htole16(MINIDUMP_PROCESSOR_ARCHITECTURE_SPARC);
 #else
 #error "I need porting"
 #endif
-        /* FIXME: i.processor_level = "cpu family"; */
-        /* FIXME: i.processor_revision = "model" << 8 | "stepping"; */
-        /* FIXME: i.cpu.x86_cpu_info.vendor_id = "vendor_id"; */
-
-        i.platform_id =  MINIDUMP_PLATFORM_LINUX;
 
         l = sysconf(_SC_NPROCESSORS_ONLN);
         i.number_of_processors = l <= 0 ? 1 : l;
@@ -806,7 +1243,201 @@ static int write_system_info_stream(struct context *c) {
 
         i.csd_version_rva = htole32((uint32_t) offset);
 
+        /* FIXME: Breakpad fills these one in too, and we should as well, based on CPUID */
+        /* FIXME: i.processor_level = "cpu family"; */
+        /* FIXME: i.processor_revision = "model" << 8 | "stepping"; */
+        /* FIXME: i.cpu.x86_cpu_info.vendor_id = "vendor_id"; */
+
+        /* FIXME: On top of that we probably should fill in these as well: */
+        /* FIXME: i.major_version = 3 */
+        /* FIXME: i.minor_version = 3*/
+        /* FIXME: i.build_number = 1 */
+        /* FIXME: i.cpu.x86_cpu_info = CPUID... */
+
         return write_blob_stream(c, MINIDUMP_SYSTEM_INFO_STREAM, &i, sizeof(i));
+}
+
+#ifdef __x86_64
+#define minidump_context minidump_context_amd64
+
+static void fill_context(struct minidump_context_amd64 *context, struct thread_info *t) {
+        assert(context);
+        assert(t);
+
+        context->context_flags = MINIDUMP_CONTEXT_AMD64_FULL|MINIDUMP_CONTEXT_AMD64_SEGMENTS;
+
+        context->cs = t->regs.cs;
+        context->ds = t->regs.ds;
+        context->es = t->regs.es;
+        context->fs = t->regs.fs;
+        context->gs = t->regs.gs;
+        context->ss = t->regs.ss;
+        context->eflags = t->regs.eflags;
+        context->dr0 = t->user.u_debugreg[0];
+        context->dr1 = t->user.u_debugreg[1];
+        context->dr2 = t->user.u_debugreg[2];
+        context->dr3 = t->user.u_debugreg[3];
+        context->dr6 = t->user.u_debugreg[6];
+        context->dr7 = t->user.u_debugreg[7];
+        context->rax = t->regs.rax;
+        context->rcx = t->regs.rcx;
+        context->rdx = t->regs.rdx;
+        context->rbx = t->regs.rbx;
+        context->rsp = t->regs.rsp;
+        context->rbp = t->regs.rbp;
+        context->rsi = t->regs.rsi;
+        context->rdi = t->regs.rdi;
+        context->r8 = t->regs.r8;
+        context->r9 = t->regs.r9;
+        context->r10 = t->regs.r10;
+        context->r11 = t->regs.r11;
+        context->r12 = t->regs.r12;
+        context->r13 = t->regs.r13;
+        context->r14 = t->regs.r14;
+        context->r15 = t->regs.r15;
+        context->rip = t->regs.rip;
+
+        context->flt_save.control_word = t->fpregs.cwd;
+        context->flt_save.status_word = t->fpregs.swd;
+        context->flt_save.tag_word = t->fpregs.ftw;
+        context->flt_save.error_opcode = t->fpregs.fop;
+        context->flt_save.error_offset = t->fpregs.rip;
+        context->flt_save.data_offset = t->fpregs.rdp;
+        context->flt_save.mx_csr = t->fpregs.mxcsr;
+        context->flt_save.mx_csr_mask = t->fpregs.mxcr_mask;
+        memcpy(&context->flt_save.float_registers, &t->fpregs.st_space, 8 * 16);
+        memcpy(&context->flt_save.xmm_registers, &t->fpregs.xmm_space, 16 * 16);
+}
+#else
+#error "I need porting"
+#endif
+
+static int write_thread_list_stream(struct context *c) {
+        struct minidump_thread_list *h;
+        unsigned i;
+        size_t l;
+        int r;
+
+        l = offsetof(struct minidump_thread_list, threads) +
+                sizeof(struct minidump_thread) * c->n_threads;
+        h = alloca(l);
+        h->number_of_threads = htole32(c->n_threads);
+
+        for (i = 0; i < c->n_threads; i++) {
+                struct thread_info *a;
+                struct minidump_thread *b;
+                size_t offset;
+                struct minidump_context context;
+                struct map_info *m;
+
+                a = c->threads + i;
+                b = h->threads + i;
+
+                fill_context(&context, a);
+                r = append_bytes(c, &context, sizeof(context), &offset);
+                if (r < 0)
+                        return r;
+
+                memset(b, 0, sizeof(*b));
+                b->thread_id = htole32(a->tid);
+                b->thread_context.rva = htole32(offset);
+                b->thread_context.data_size = htole32(sizeof(context));
+
+                m = find_map_info(c->write_maps, c->n_write_maps, a->stack_pointer);
+                if (m) {
+                        b->stack.start_of_memory_range = htole64(m->extent.address);
+                        b->stack.memory.data_size = htole32(m->extent.size);
+                        b->stack.memory.rva = htole32(m->minidump_offset);
+                }
+        }
+
+        return write_blob_stream(c, MINIDUMP_THREAD_LIST_STREAM, h, l);
+}
+
+static int write_module_list_stream(struct context *c) {
+        struct minidump_module_list *h;
+        unsigned i;
+        size_t l;
+        int r;
+
+        assert(c);
+
+        l = offsetof(struct minidump_module_list, modules) +
+                sizeof(struct minidump_module) * c->n_maps;
+        h = alloca(l);
+        h->number_of_modules = htole32(c->n_maps);
+
+        for (i = 0; i < c->n_maps; i++) {
+                struct map_info *a;
+                struct minidump_module *b;
+                size_t offset;
+
+                a = c->maps + i;
+                b = h->modules + i;
+
+                memset(b, 0, sizeof(*b));
+                b->base_of_image = htole64(a->extent.address);
+                b->size_of_image = htole32(a->extent.size);
+
+                if (a->name) {
+                        r = write_string(c, a->name, &offset);
+                        if (r < 0)
+                                return r;
+
+                        b->module_name_rva = htole32(offset);
+                }
+
+                /* FIXME: we should fill in a lot more here */
+        }
+
+        return write_blob_stream(c, MINIDUMP_MODULE_LIST_STREAM, h, l);
+}
+
+static int write_memory_list_stream(struct context *c) {
+        struct minidump_memory_list *h;
+        unsigned i;
+        size_t l;
+        int r;
+
+        assert(c);
+
+        l = offsetof(struct minidump_memory_list, memory_ranges) +
+                sizeof(struct minidump_memory_descriptor) * c->n_write_maps;
+        h = alloca(l);
+        h->number_of_memory_ranges = htole32(c->n_write_maps);
+
+        for (i = 0; i < c->n_write_maps; i++) {
+                struct map_info *a;
+                struct minidump_memory_descriptor *b;
+                size_t offset;
+                void *p;
+
+                a = c->write_maps + i;
+                b = h->memory_ranges + i;
+
+                r = reserve_bytes(c, a->extent.size, &p, &offset);
+                if (r < 0)
+                        return r;
+
+                r = read_memory(c, a->extent.address, p, a->extent.size);
+                if (r < 0)
+                        return r;
+
+                memset(b, 0, sizeof(*b));
+                b->start_of_memory_range = htole64(a->extent.address);
+                b->memory.rva = htole32(offset);
+                b->memory.data_size = htole32(a->extent.size);
+
+                a->minidump_offset = offset;
+        }
+
+        return write_blob_stream(c, MINIDUMP_MEMORY_LIST_STREAM, h, l);
+}
+
+static int write_exception_stream(struct context *c) {
+        assert(c);
+
+        return 0;
 }
 
 static int write_directory(struct context *c) {
@@ -822,14 +1453,14 @@ static int write_directory(struct context *c) {
 
         /* The beginning of the minidump is definitely aligned, so we
          * access it directly and patch in the directory data. */
-        h = c->minidump;
+        h = c->output;
         h->number_of_streams = htole32(c->minidump_n_streams);
         h->stream_directory_rva = htole32((uint32_t) offset);
 
         return 0;
 }
 
-static int write_dump(struct context *c) {
+static int write_minidump(struct context *c) {
         struct minidump_header h;
         int r;
 
@@ -844,42 +1475,69 @@ static int write_dump(struct context *c) {
         if (r < 0)
                 return r;
 
-        r = foreach_thread(c);
+        r = write_memory_list_stream(c);
         if (r < 0)
                 return r;
 
-        /* write thread list */
-        /* write mappings */
-        /* write memory list */
-        /* write exception */
-        /* write system info */
-        /* write rpm info */
-        /* write debug */
-
-        write_system_info_stream(c);
-
-        /* This is a Ubuntuism, but Google is doing this, hence let's stay compatible here */
-        write_file_stream(c, MINIDUMP_LINUX_LSB_RELEASE, "/etc/lsb-release");
-        /* It's much nicer to write /etc/os-release instead, which is more widely supported */
-        write_file_stream(c, MINIDUMP_LINUX_OS_RELEASE, "/etc/os-release");
-
-        write_file_stream(c, MINIDUMP_LINUX_CPU_INFO, "/proc/cpuinfo");
-
-        write_proc_file_stream(c, MINIDUMP_LINUX_PROC_STATUS, "status");
-        write_proc_file_stream(c, MINIDUMP_LINUX_CMD_LINE, "cmdline");
-        write_proc_file_stream(c, MINIDUMP_LINUX_ENVIRON, "environ");
-        write_proc_file_stream(c, MINIDUMP_LINUX_COMM, "comm");
-        write_proc_readlink_stream(c, MINIDUMP_LINUX_EXE, "exe");
-
-        r = write_proc_file_stream(c, MINIDUMP_LINUX_MAPS, "maps");
+        r = write_thread_list_stream(c);
         if (r < 0)
                 return r;
 
-        if (c->auxv) {
-                r = write_blob_stream(c, MINIDUMP_LINUX_AUXV, c->auxv, c->auxv_size);
-                if (r < 0)
-                        return r;
-        }
+        r = write_module_list_stream(c);
+        if (r < 0)
+                return r;
+
+        r = write_exception_stream(c);
+        if (r < 0)
+                return r;
+
+        r = write_system_info_stream(c);
+        if (r < 0)
+                return r;
+
+        r = write_buffer_stream(c, MINIDUMP_LINUX_MAPS, &c->proc_maps);
+        if (r < 0)
+                return r;
+
+        r = write_buffer_stream(c, MINIDUMP_LINUX_PROC_STATUS, &c->proc_status);
+        if (r < 0)
+                return r;
+
+        r = write_buffer_stream(c, MINIDUMP_LINUX_ENVIRON, &c->proc_environ);
+        if (r < 0)
+                return r;
+
+        r = write_buffer_stream(c, MINIDUMP_LINUX_CMD_LINE, &c->proc_cmdline);
+        if (r < 0)
+                return r;
+
+        r = write_buffer_stream(c, MINIDUMP_LINUX_COMM, &c->proc_comm);
+        if (r < 0)
+                return r;
+
+        r = write_buffer_stream(c, MINIDUMP_LINUX_ATTR_CURRENT, &c->proc_attr_current);
+        if (r < 0)
+                return r;
+
+        r = write_buffer_stream(c, MINIDUMP_LINUX_EXE, &c->proc_exe);
+        if (r < 0)
+                return r;
+
+        r = write_buffer_stream(c, MINIDUMP_LINUX_CPU_INFO, &c->proc_cpuinfo);
+        if (r < 0)
+                return r;
+
+        r = write_buffer_stream(c, MINIDUMP_LINUX_LSB_RELEASE, &c->lsb_release);
+        if (r < 0)
+                return r;
+
+        r = write_buffer_stream(c, MINIDUMP_LINUX_OS_RELEASE, &c->os_release);
+        if (r < 0)
+                return r;
+
+        r = write_buffer_stream(c, MINIDUMP_LINUX_AUXV, &c->auxv);
+        if (r < 0)
+                return r;
 
         if (HAVE_COREDUMP(c)) {
                 r = write_blob_stream(c, MINIDUMP_LINUX_PRPSINFO, &c->prpsinfo, sizeof(c->prpsinfo));
@@ -891,6 +1549,9 @@ static int write_dump(struct context *c) {
                         return r;
         }
 
+        /* We probably should find __abort_msg and __glib_assert_msg
+         * and include it here */
+
         r = write_directory(c);
         if (r < 0)
                 return r;
@@ -898,62 +1559,370 @@ static int write_dump(struct context *c) {
         return 0;
 }
 
-int minidump_make(pid_t pid, int fd, void **minidump, size_t *size) {
+static int write_minicore(struct context *c) {
+        assert(c);
+
+        return 0;
+}
+
+static int show_buffer(FILE *f, const char *title, struct buffer *b) {
+        char *p;
+
+        assert(f);
+        assert(b);
+
+        if (!b->data)
+                return 0;
+
+        fprintf(f, "-- %s\n", title);
+
+        for (p = b->data; p < b->data + b->size; p++) {
+
+                if ((*p < ' ' || *p >= 127) &&
+                    *p != '\n' &&
+                    *p != '\t') {
+                        fprintf(f, "\\x%02x", *p);
+                } else
+                        putc(*p, f);
+        }
+
+        putc('\n', f);
+        return 0;
+}
+
+static void map_show(FILE *f, unsigned i, struct map_info *m) {
+        assert(f);
+        assert(m);
+
+        fprintf(f, "%4u: ", i);
+
+        fprintf(f, "%016lx-%016lx %20lu bytes",
+                (unsigned long) m->extent.address,
+                (unsigned long) (m->extent.address + m->extent.size),
+                m->extent.size);
+
+        if (m->build_id)
+                fprintf(f, "(build-id %s)", m->build_id);
+
+        if (m->name) {
+                fputs(" \"", f);
+                fputs(m->name, f);
+                fputc('\"', f);
+        }
+
+        fputc('\n', f);
+}
+
+static void thread_show(FILE *f, unsigned i, struct thread_info *t) {
+        assert(f);
+        assert(t);
+
+        fprintf(f,
+                "%4u %10lu: IP=%016lx SP=%016lx",
+                i,
+                (unsigned long) t->tid,
+                (unsigned long) t->instruction_pointer,
+                (unsigned long) t->stack_pointer);
+
+        if (t->name) {
+                fputs("\" ", f);
+                fputs(t->name, f);
+                fputc('\"', f);
+        }
+
+        fputc('\n', f);
+}
+
+static void context_show(FILE *f, struct context *c) {
+        unsigned i;
+        unsigned long sum;
+
+        assert(f);
+        assert(c);
+
+        fputs("-- Available Maps\n", f);
+        for (i = 0, sum = 0; i < c->n_maps; i++) {
+                map_show(f, i, c->maps + i);
+                sum += c->maps[i].extent.size;
+        }
+        fprintf(f, "Total size = %lu bytes\n", sum);
+
+        fputs("-- Reduced Maps\n", f);
+        for (i = 0, sum = 0; i < c->n_write_maps; i++) {
+                map_show(f, i, c->write_maps + i);
+                sum += c->write_maps[i].extent.size;
+        }
+        fprintf(f, "Total size = %lu bytes\n", sum);
+
+        fputs("-- Threads\n", f);
+        for (i = 0; i < c->n_threads; i++)
+                thread_show(f, i, c->threads + i);
+
+        show_buffer(f, "Auxiliary Vector", &c->auxv);
+        show_buffer(f, "/proc/$PID/maps", &c->proc_maps);
+        show_buffer(f, "/proc/$PID/status", &c->proc_status);
+        show_buffer(f, "/proc/$PID/cmdline", &c->proc_cmdline);
+        show_buffer(f, "/proc/$PID/environ", &c->proc_environ);
+        show_buffer(f, "/proc/$PID/comm", &c->proc_comm);
+        show_buffer(f, "/proc/$PID/attr_context", &c->proc_attr_current);
+        show_buffer(f, "/proc/$PID/exe", &c->proc_exe);
+        show_buffer(f, "/proc/cpuinfo", &c->proc_cpuinfo);
+        show_buffer(f, "/etc/lsb-release", &c->lsb_release);
+        show_buffer(f, "/etc/os-release", &c->os_release);
+}
+
+static int proc_load_fields(struct context *c) {
+        int r;
+
+        assert(c);
+        assert(c->pid >= 0);
+
+        /* These ones matter */
+        r = proc_read_pid_buffer(c->pid, "maps", &c->proc_maps);
+        if (r < 0)
+                return r;
+
+        r = proc_read_pid_buffer(c->pid, "auxv", &c->auxv);
+        if (r < 0)
+                return r;
+
+        /* The following ones don't really matter, so don't check return values */
+        proc_read_pid_buffer(c->pid, "status", &c->proc_status);
+        proc_read_pid_buffer(c->pid, "cmdline", &c->proc_cmdline);
+        proc_read_pid_buffer(c->pid, "environ", &c->proc_environ);
+        proc_read_pid_buffer(c->pid, "comm", &c->proc_comm);
+        proc_read_pid_buffer(c->pid, "attr/current", &c->proc_attr_current);
+        proc_readlink_pid_buffer(c->pid, "exe", &c->proc_exe);
+
+        proc_read_buffer("/proc/cpuinfo", &c->proc_cpuinfo);
+        /* This is an Ubuntuism, but Google is doing this, hence let's stay compatible here */
+        proc_read_buffer("/etc/lsb-release", &c->lsb_release);
+        /* It's much nicer to write /etc/os-release instead, which is more widely supported */
+        proc_read_buffer("/etc/os-release", &c->os_release);
+
+        return 0;
+}
+
+static int map_compare(const void *_a, const void *_b) {
+        const struct map_info *a = _a, *b = _b;
+
+        if (a->extent.address < b->extent.address)
+                return -1;
+
+        if (a->extent.address >= b->extent.address)
+                return 1;
+
+        return 0;
+}
+
+static int context_load(struct context *c) {
+        int r;
+
+        assert(c);
+
+        if (HAVE_MINIDUMP(c)) {
+                /* r = minidump_read_header(c); */
+                /* if (r < 0) */
+                /*         return r; */
+
+                /* r = minidump_read_maps(c); */
+                /* if (r < 0) */
+                /*         return r; */
+
+                /* r = minidump_read_threads(c); */
+                /* if (r < 0) */
+                /*         return r; */
+        }
+
+        if (HAVE_COREDUMP(c)) {
+                r = coredump_read_header(c->coredump_fd, &c->header);
+                if (r < 0)
+                        return r;
+
+                r = coredump_read_maps(c);
+                if (r < 0)
+                        return r;
+
+                r = coredump_read_threads(c);
+                if (r < 0)
+                        return r;
+        }
+
+        if (HAVE_PROCESS(c)) {
+                if (kill(c->pid, 0) < 0)
+                        return -errno;
+
+                r = attach_threads(c);
+                if (r < 0)
+                        return r;
+
+                r = proc_read_maps(c);
+                if (r < 0)
+                        return r;
+
+                r = proc_read_threads(c);
+                if (r < 0)
+                        return r;
+
+                r = proc_load_fields(c);
+                if (r < 0)
+                        return r;
+        }
+
+        r = pick_maps(c);
+        if (r < 0)
+                return r;
+
+        r = merge_maps(c);
+        if (r < 0)
+                return r;
+
+        r = mask_maps(c);
+        if (r < 0)
+                return r;
+
+        qsort(c->maps, c->n_maps, sizeof(struct map_info), map_compare);
+        qsort(c->write_maps, c->n_write_maps, sizeof(struct map_info), map_compare);
+
+        return r;
+}
+
+static void context_release(struct context *c) {
+        unsigned j;
+
+        assert(c);
+
+        if (HAVE_PROCESS(c))
+                detach_threads(c);
+
+        free(c->auxv.data);
+        for (j = 0; j < c->n_maps; j++)
+                free(c->maps[j].name);
+        free(c->maps);
+        free(c->threads);
+        free(c->output);
+        free(c->proc_maps.data);
+        free(c->proc_status.data);
+        free(c->proc_environ.data);
+        free(c->proc_cmdline.data);
+        free(c->proc_comm.data);
+        free(c->proc_attr_current.data);
+        free(c->proc_exe.data);
+        free(c->proc_cpuinfo.data);
+        free(c->lsb_release.data);
+        free(c->os_release.data);
+}
+
+static int make(pid_t pid, int fd,
+                void **output, size_t *output_size,
+                int (*write_dump)(struct context *c)) {
         struct context c;
         int r;
 
         if (pid <= 0 && fd < 0)
                 return -EINVAL;
 
-        if (!minidump)
+        if (!output)
                 return -EINVAL;
 
-        if (!size)
+        if (!output_size)
                 return -EINVAL;
-
-        if (pid > 0)
-                if (kill(pid, 0) < 0)
-                        return -errno;
 
         memset(&c, 0, sizeof(c));
-
         c.pid = pid;
-        c.fd = fd;
+        c.coredump_fd = fd;
+        c.minidump_fd = -1;
 
-        if (HAVE_PROCESS(&c)) {
-                r = attach_threads(&c);
-                if (r < 0)
-                        goto finish;
-
-                r = proc_read_auxv(&c);
-                if (r < 0)
-                        goto finish;
-        }
-
-        if (HAVE_COREDUMP(&c)) {
-                r = coredump_read_header(fd, &c.header);
-                if (r < 0)
-                        return r;
-        }
+        r = context_load(&c);
+        if (r < 0)
+                goto finish;
 
         r = write_dump(&c);
         if (r < 0)
                 goto finish;
 
+        *output = c.output;
+        *output_size = c.output_size;
+        c.output = NULL;
 
-        *minidump = c.minidump;
-        *size = c.minidump_size;
+finish:
+        context_release(&c);
+        return r;
+}
 
-        c.minidump = NULL;
+int minidump_make(pid_t pid, int fd, void **minidump, size_t *size) {
+        return make(pid, fd, minidump, size, write_minidump);
+}
 
+int minicore_make(pid_t pid, int fd, void **minicore, size_t *size) {
+        return make(pid, fd, minicore, size, write_minicore);
+}
+
+static int show(FILE *f, pid_t pid, int coredump_fd, int minidump_fd) {
+        struct context c;
+        int r;
+
+        if (!f)
+                f = stdout;
+
+        if (coredump_fd < 0 && pid <= 0 && minidump_fd < 0)
+                return -EINVAL;
+
+        memset(&c, 0, sizeof(c));
+        c.pid = pid;
+        c.coredump_fd = coredump_fd;
+        c.minidump_fd = minidump_fd;
+
+        r = context_load(&c);
+        if (r < 0)
+                goto finish;
+
+        context_show(f, &c);
         r = 0;
 
 finish:
-        if (HAVE_PROCESS(&c))
-                detach_threads(&c);
+        context_release(&c);
+        return r;
+}
 
-        free(c.minidump);
-        free(c.auxv);
+int minidump_show(FILE *f, int minidump_fd) {
+        return show(f, 0, -1, minidump_fd);
+}
 
+int coredump_show(FILE *f, pid_t pid, int coredump_fd) {
+        return show(f, pid, coredump_fd, -1);
+}
+
+int minidump_to_minicore(int minidump_fd, void **output, size_t *output_size) {
+        struct context c;
+        int r;
+
+        if (minidump_fd < 0)
+                return -EINVAL;
+
+        if (!output)
+                return -EINVAL;
+
+        if (!output_size)
+                return -EINVAL;
+
+        memset(&c, 0, sizeof(c));
+        c.coredump_fd = -1;
+        c.minidump_fd = minidump_fd;
+
+        r = context_load(&c);
+        if (r < 0)
+                goto finish;
+
+        r = write_minicore(&c);
+        if (r < 0)
+                goto finish;
+
+        *output = c.output;
+        *output_size = c.output_size;
+        c.output = NULL;
+
+finish:
+        context_release(&c);
         return r;
 }

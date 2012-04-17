@@ -1,3 +1,4 @@
+
 /*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
 
 #include <stdio.h>
@@ -25,9 +26,10 @@ int main(int argc, char *argv[]) {
 
         errno = 0;
         l = strtoul(argv[1], &p, 10);
-        if (errno == 0 && p && *p == 0 && l > 0)
-                r = minidump_make((pid_t) l, -1, &minidump, &minidump_size);
-        else {
+        if (errno == 0 && p && *p == 0 && l > 0) {
+                coredump_show(stderr, (pid_t) l, -1);
+                /* r = minidump_make((pid_t) l, -1, &minidump, &minidump_size); */
+        } else {
                 fd = open(argc >= 2 ? argv[1] : "core", O_RDONLY|O_CLOEXEC);
                 if (fd < 0) {
                         fprintf(stderr, "Failed to open core dump: %m\n");
@@ -35,8 +37,11 @@ int main(int argc, char *argv[]) {
                         goto fail;
                 }
 
-                r = minidump_make(0, fd, &minidump, &minidump_size);
+                coredump_show(stderr, 0, fd);
+                /* r = minidump_make(0, fd, &minidump, &minidump_size); */
         }
+        r = 0;
+
         if (r < 0) {
                 fprintf(stderr, "Failed to generate minidump: %s\n", strerror(-r));
                 goto fail;
