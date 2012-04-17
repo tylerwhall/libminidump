@@ -1134,7 +1134,7 @@ static int minidump_write_string(struct context *c, const char *s, size_t *offse
                 /* We just care about ASCII, so the conversion to UTF16 is trivial */
 
                 le = htole16(s[i]);
-                memcpy(h.buffer + i, &le, 2);
+                memcpy((uint8_t*) p + offsetof(struct minidump_string, buffer) + (2 * i), &le, 2);
 
                 /* FIXME: We should have proper UTF8 → UTF16 conversion here */
         }
