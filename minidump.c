@@ -51,6 +51,10 @@ struct thread_info {
         unsigned long instruction_pointer;
         char *name;
 
+        bool have_prstatus:1;
+        bool have_siginfo:1;
+        bool have_user:1;
+
         struct elf_prstatus prstatus;         /* only available on coredumps */
         siginfo_t siginfo;                    /* only available on ptrace */
         struct user user;                     /* only available on ptrace */
@@ -60,12 +64,18 @@ struct thread_info {
 #ifdef __i386
         struct user_fpxregs_struct fpxregs;
 #endif
+
+        size_t minidump_offset;
 };
 
 struct context {
         pid_t pid;
         int coredump_fd;
         int minidump_fd;
+
+        bool have_coredump_header:1;
+        bool have_minidump_header:1;
+        bool have_prpsinfo:1;
 
         ElfW(Ehdr) coredump_header;              /* only available on coredumps */
         struct elf_prpsinfo prpsinfo;            /* only available on coredumps */
@@ -475,6 +485,8 @@ static int minidump_read_header(struct context *c) {
         if (c->minidump_header.signature != htole32(0x504d444d))
                 return -EINVAL;
 
+        c->have_minidump_header = true;
+
         return 0;
 }
 
@@ -566,6 +578,8 @@ static int read_thread_info_ptrace(struct context *c, pid_t tid, struct thread_i
         if (iovec.iov_len != sizeof(i->fpxregs))
                 return -EIO;
 #endif
+
+        i->have_siginfo = i->have_user = true;
 
         return 0;
 }
@@ -753,11 +767,15 @@ static int coredump_read_threads(struct context *c) {
                 if (!found_prstatus || !found_fpregset)
                         return -EIO;
 
+                i.have_prstatus = true;
+
                 add_thread(c, &i);
         }
 
         if (!found_prpsinfo || !found_auxv)
                 return -EIO;
+
+        c->have_prpsinfo = true;
 
         return 0;
 }
@@ -1313,12 +1331,14 @@ static void minidump_fill_context(struct minidump_context_amd64 *context, struct
         context->gs = t->regs.gs;
         context->ss = t->regs.ss;
         context->eflags = t->regs.eflags;
-        context->dr0 = t->user.u_debugreg[0];
-        context->dr1 = t->user.u_debugreg[1];
-        context->dr2 = t->user.u_debugreg[2];
-        context->dr3 = t->user.u_debugreg[3];
-        context->dr6 = t->user.u_debugreg[6];
-        context->dr7 = t->user.u_debugreg[7];
+        if (t->have_user) {
+                context->dr0 = t->user.u_debugreg[0];
+                context->dr1 = t->user.u_debugreg[1];
+                context->dr2 = t->user.u_debugreg[2];
+                context->dr3 = t->user.u_debugreg[3];
+                context->dr6 = t->user.u_debugreg[6];
+                context->dr7 = t->user.u_debugreg[7];
+        }
         context->rax = t->regs.rax;
         context->rcx = t->regs.rcx;
         context->rdx = t->regs.rdx;
@@ -1374,6 +1394,7 @@ static int minidump_write_thread_list_stream(struct context *c) {
                 a = c->threads + i;
                 b = h->threads + i;
 
+                memset(&context, 0, sizeof(context));
                 minidump_fill_context(&context, a);
                 r = append_bytes(c, &context, sizeof(context), &offset);
                 if (r < 0)
@@ -1390,6 +1411,8 @@ static int minidump_write_thread_list_stream(struct context *c) {
                         b->stack.memory.data_size = htole32(m->extent.size);
                         b->stack.memory.rva = htole32(m->minidump_offset);
                 }
+
+                a->minidump_offset = offset;
         }
 
         return minidump_write_blob_stream(c, MINIDUMP_THREAD_LIST_STREAM, h, l);
@@ -1478,11 +1501,28 @@ static int minidump_write_memory_list_stream(struct context *c) {
 }
 
 static int minidump_write_exception_stream(struct context *c) {
+        struct minidump_exception_stream h;
+        struct thread_info *t;
+
         assert(c);
+        assert(c->n_threads > 0);
 
-        /* FIXME */
+        t = c->threads+0;
 
-        return 0;
+        memset(&h, 0, sizeof(h));
+        h.thread_id = htole32(t->tid);
+
+        if (t->have_prstatus)
+                h.exception_record.exception_code = htole32(t->prstatus.pr_info.si_signo);
+        else if (t->have_siginfo) {
+                h.exception_record.exception_code = htole32(t->siginfo.si_signo);
+                h.exception_record.exception_address = htole64((uint64_t) t->siginfo.si_addr);
+        }
+
+        h.thread_context.data_size = htole32(sizeof(struct minidump_context));
+        h.thread_context.rva = htole32(t->minidump_offset);
+
+        return minidump_write_blob_stream(c, MINIDUMP_EXCEPTION_STREAM, &h, sizeof(h));
 }
 
 static int minidump_write_directory(struct context *c) {
@@ -1584,11 +1624,13 @@ static int write_minidump(struct context *c) {
         if (r < 0)
                 return r;
 
-        if (HAVE_COREDUMP(c)) {
+        if (c->have_prpsinfo) {
                 r = minidump_write_blob_stream(c, MINIDUMP_LINUX_PRPSINFO, &c->prpsinfo, sizeof(c->prpsinfo));
                 if (r < 0)
                         return r;
+        }
 
+        if (c->have_coredump_header) {
                 r = minidump_write_blob_stream(c, MINIDUMP_LINUX_CORE_EHDR, &c->coredump_header, sizeof(c->coredump_header));
                 if (r < 0)
                         return r;
@@ -1785,6 +1827,8 @@ static int context_load(struct context *c) {
                 r = coredump_read_header(c->coredump_fd, &c->coredump_header);
                 if (r < 0)
                         return r;
+
+                c->have_coredump_header = true;
 
                 r = coredump_read_maps(c);
                 if (r < 0)
