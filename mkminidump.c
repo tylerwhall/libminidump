@@ -19,11 +19,24 @@ static char *arg_minicore = NULL;
 static int help(void) {
 
         printf("%s [OPTIONS...] [FILE]\n\n"
-               "Generate, decode or convert a mindump or minicore.\n\n"
+               "Generate, convert or show contents of a minidump or minicore/coredump.\n\n"
                "  -h --help             Show this help\n"
                "  -p --pid=PID          Generate from PID\n"
                "  -d --minidump[=FILE]  Generate a minidump\n"
-               "  -c --minicore[=FILE]  Generate a minicore\n",
+               "  -c --minicore[=FILE]  Generate a minicore\n\n"
+               "Examples:\n\n"
+               "    Generate a minidump from PID 4711\n"
+               "    # mkminidump -p 4711 -d foobar.dmp\n\n"
+               "    Generate a minicore from PID 815\n"
+               "    # mkminidump -p 815 -c foobar.core\n\n"
+               "    Convert a coredump to a minidump\n"
+               "    # mkminidump foobar.core -d foobar.dmp\n\n"
+               "    Convert a minidump to a minicore\n"
+               "    # mkminidump foobar.dmp -c foobar.core\n\n"
+               "    Show contents of a minidump\n"
+               "    # mkminidump fooobar.dmp\n\n"
+               "    Show contents of a coredump\n"
+               "    # mkminidump foobar.core\n\n",
                program_invocation_short_name);
 
         return 0;
