@@ -67,8 +67,10 @@ struct context {
         int coredump_fd;
         int minidump_fd;
 
-        ElfW(Ehdr) header;                    /* only available on coredumps */
-        struct elf_prpsinfo prpsinfo;         /* only available on coredumps */
+        ElfW(Ehdr) coredump_header;              /* only available on coredumps */
+        struct elf_prpsinfo prpsinfo;            /* only available on coredumps */
+
+        struct minidump_header minidump_header;  /* only available on minidumps */
 
         struct buffer auxv;
 
@@ -365,6 +367,8 @@ static int minidump_read_memory(struct context *c, unsigned long source, void *d
         assert(length > 0);
         assert(c->minidump_fd >= 0);
 
+        /* FIXME */
+
         return -ENOTSUP;
 }
 
@@ -376,7 +380,7 @@ static int read_memory(struct context *c, unsigned long source, void *destinatio
         assert(length > 0);
 
         if (HAVE_COREDUMP(c)) {
-                r = coredump_read_memory(c->coredump_fd, &c->header, source, destination, length);
+                r = coredump_read_memory(c->coredump_fd, &c->coredump_header, source, destination, length);
 
                 if (r != 0)
                         return r;
@@ -456,6 +460,24 @@ static int proc_readlink_pid_buffer(pid_t pid, const char *field, struct buffer 
         return 0;
 }
 
+static int minidump_read_header(struct context *c) {
+        ssize_t l;
+
+        assert(c);
+        assert(HAVE_MINIDUMP(c));
+
+        l = pread(c->minidump_fd, &c->minidump_header, sizeof(c->minidump_header), 0);
+        if (l < 0)
+                return -errno;
+        if (l != sizeof(c->minidump_header))
+                return -EIO;
+
+        if (c->minidump_header.signature != htole32(0x504d444d))
+                return -EINVAL;
+
+        return 0;
+}
+
 static int add_thread(struct context *c, struct thread_info *i) {
         unsigned j;
 
@@ -494,7 +516,6 @@ static int add_thread(struct context *c, struct thread_info *i) {
                 (unsigned long) i->instruction_pointer);
         return 0;
 }
-
 
 static int read_thread_info_ptrace(struct context *c, pid_t tid, struct thread_info *i) {
         int r;
@@ -602,7 +623,7 @@ static int coredump_read_threads(struct context *c) {
         assert(c);
         assert(HAVE_COREDUMP(c));
 
-        r = coredump_find_note_segment(c->coredump_fd, &c->header, &offset, &length);
+        r = coredump_find_note_segment(c->coredump_fd, &c->coredump_header, &offset, &length);
         if (r < 0)
                 return r;
         if (r == 0)
@@ -741,6 +762,14 @@ static int coredump_read_threads(struct context *c) {
         return 0;
 }
 
+static int minidump_read_threads(struct context *c) {
+        assert(c);
+
+        /* FIXME */
+
+        return -ENOTSUP;
+}
+
 static int add_mapping(struct context *c, unsigned long start, unsigned long end, const char *name) {
         unsigned j;
 
@@ -854,10 +883,10 @@ static int coredump_read_maps(struct context *c) {
         assert(c);
         assert(HAVE_COREDUMP(c));
 
-        for (i = 0; i < c->header.e_phnum; i++) {
+        for (i = 0; i < c->coredump_header.e_phnum; i++) {
                 ElfW(Phdr) segment;
 
-                r = coredump_read_segment_header(c->coredump_fd, &c->header, i, &segment);
+                r = coredump_read_segment_header(c->coredump_fd, &c->coredump_header, i, &segment);
                 if (r < 0)
                         return r;
 
@@ -870,6 +899,14 @@ static int coredump_read_maps(struct context *c) {
         }
 
         return 0;
+}
+
+static int minidump_read_maps(struct context *c) {
+        assert(c);
+
+        /* FIXME */
+
+        return -ENOTSUP;
 }
 
 static int pick_maps(struct context *c) {
@@ -1548,7 +1585,7 @@ static int write_minidump(struct context *c) {
                 if (r < 0)
                         return r;
 
-                r = minidump_write_blob_stream(c, MINIDUMP_LINUX_CORE_EHDR, &c->header, sizeof(c->header));
+                r = minidump_write_blob_stream(c, MINIDUMP_LINUX_CORE_EHDR, &c->coredump_header, sizeof(c->coredump_header));
                 if (r < 0)
                         return r;
         }
@@ -1725,21 +1762,21 @@ static int context_load(struct context *c) {
         assert(c);
 
         if (HAVE_MINIDUMP(c)) {
-                /* r = minidump_read_header(c); */
-                /* if (r < 0) */
-                /*         return r; */
+                r = minidump_read_header(c);
+                if (r < 0)
+                        return r;
 
-                /* r = minidump_read_maps(c); */
-                /* if (r < 0) */
-                /*         return r; */
+                r = minidump_read_maps(c);
+                if (r < 0)
+                        return r;
 
-                /* r = minidump_read_threads(c); */
-                /* if (r < 0) */
-                /*         return r; */
+                r = minidump_read_threads(c);
+                if (r < 0)
+                        return r;
         }
 
         if (HAVE_COREDUMP(c)) {
-                r = coredump_read_header(c->coredump_fd, &c->header);
+                r = coredump_read_header(c->coredump_fd, &c->coredump_header);
                 if (r < 0)
                         return r;
 
