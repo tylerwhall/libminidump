@@ -239,13 +239,13 @@ int main(int argc, char *argv[]) {
                                 goto finish;
                         }
 
-                        r = output_and_free(arg_minidump, &buffer, &buffer_size);
+                        r = output_and_free(arg_minicore, &buffer, &buffer_size);
                         if (r < 0)
                                 goto finish;
                 }
 
                 if (arg_minidump) {
-                        r = minicore_make(0, fd, &buffer, &buffer_size);
+                        r = minidump_make(0, fd, &buffer, &buffer_size);
                         if (r < 0) {
                                 fprintf(stderr, "Failed to convert coredump: %s\n", strerror(-r));
                                 goto finish;
