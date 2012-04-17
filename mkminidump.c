@@ -207,7 +207,7 @@ int main(int argc, char *argv[]) {
                                 goto finish;
                         }
 
-                        r = output_and_free(arg_minidump, &buffer, &buffer_size);
+                        r = output_and_free(arg_minicore, &buffer, &buffer_size);
                         if (r < 0)
                                 goto finish;
                 }
