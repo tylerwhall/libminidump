@@ -128,7 +128,7 @@ static int output_and_free(const char *path, void **buffer, size_t *buffer_size)
         assert(buffer_size);
         assert(*buffer_size > 0);
 
-        if (!path || strcmp(path, "-")) {
+        if (!path || strcmp(path, "-") == 0) {
                 f = stdout;
                 toclose = NULL;
         } else {
