@@ -173,7 +173,7 @@ __attribute__((packed)) struct minidump_module {
 
 __attribute__((packed)) struct minidump_module_list {
         uint32_t number_of_modules;
-        struct minidump_module modules[];
+        struct minidump_module modules[1];
 };
 
 __attribute__((packed)) struct minidump_memory_descriptor{
@@ -193,12 +193,12 @@ __attribute__((packed)) struct minidump_thread {
 
 __attribute__((packed)) struct minidump_thread_list {
         uint32_t number_of_threads;
-        struct minidump_thread threads[];
+        struct minidump_thread threads[1];
 };
 
 __attribute__((packed)) struct minidump_memory_list {
         uint32_t number_of_memory_ranges;
-        struct minidump_memory_descriptor memory_ranges[];
+        struct minidump_memory_descriptor memory_ranges[1];
 };
 
 __attribute__((packed)) struct minidump_exception {
@@ -329,7 +329,7 @@ enum {
 
 __attribute__((packed)) struct minidump_string {
         uint32_t length;
-        uint16_t buffer[];
+        uint16_t buffer[1];
 };
 
 #endif

@@ -1361,6 +1361,7 @@ static int minidump_write_thread_list_stream(struct context *c) {
         l = offsetof(struct minidump_thread_list, threads) +
                 sizeof(struct minidump_thread) * c->n_threads;
         h = alloca(l);
+        memset(h, 0, l);
         h->number_of_threads = htole32(c->n_threads);
 
         for (i = 0; i < c->n_threads; i++) {
@@ -1405,6 +1406,7 @@ static int minidump_write_module_list_stream(struct context *c) {
         l = offsetof(struct minidump_module_list, modules) +
                 sizeof(struct minidump_module) * c->n_maps;
         h = alloca(l);
+        memset(h, 0, l);
         h->number_of_modules = htole32(c->n_maps);
 
         for (i = 0; i < c->n_maps; i++) {
@@ -1444,6 +1446,7 @@ static int minidump_write_memory_list_stream(struct context *c) {
         l = offsetof(struct minidump_memory_list, memory_ranges) +
                 sizeof(struct minidump_memory_descriptor) * c->n_write_maps;
         h = alloca(l);
+        memset(h, 0, l);
         h->number_of_memory_ranges = htole32(c->n_write_maps);
 
         for (i = 0; i < c->n_write_maps; i++) {
