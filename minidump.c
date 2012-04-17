@@ -1069,7 +1069,7 @@ static int append_bytes(struct context *c, const void *data, size_t bytes, size_
         return r;
 }
 
-static int write_string(struct context *c, const char *s, size_t *offset) {
+static int minidump_write_string(struct context *c, const char *s, size_t *offset) {
         size_t n, l;
         struct minidump_string h;
         unsigned i;
@@ -1097,12 +1097,14 @@ static int write_string(struct context *c, const char *s, size_t *offset) {
 
                 le = htole16(s[i]);
                 memcpy(h.buffer + i, &le, 2);
+
+                /* FIXME: We should have proper UTF8 → UTF16 conversion here */
         }
 
         return 0;
 }
 
-static int append_directory(struct context *c, uint32_t stream_type, size_t offset, size_t size) {
+static int minidump_append_directory(struct context *c, uint32_t stream_type, size_t offset, size_t size) {
         uint32_t i;
 
         assert(c);
@@ -1119,7 +1121,7 @@ static int append_directory(struct context *c, uint32_t stream_type, size_t offs
         return 0;
 }
 
-static int write_blob_stream(struct context *c, uint32_t stream_type, const void *buffer, size_t size) {
+static int minidump_write_blob_stream(struct context *c, uint32_t stream_type, const void *buffer, size_t size) {
         int r;
         size_t offset;
 
@@ -1131,21 +1133,21 @@ static int write_blob_stream(struct context *c, uint32_t stream_type, const void
         if (r < 0)
                 return r;
 
-        r = append_directory(c, stream_type, offset, size);
+        r = minidump_append_directory(c, stream_type, offset, size);
         if (r < 0)
                 return r;
 
         return r;
 }
 
-static int write_buffer_stream(struct context *c, uint32_t stream_type, const struct buffer *buffer) {
+static int minidump_write_buffer_stream(struct context *c, uint32_t stream_type, const struct buffer *buffer) {
         assert(c);
         assert(buffer);
 
         if (!buffer->data)
                 return 0;
 
-        return write_blob_stream(c, stream_type, buffer->data, buffer->size);
+        return minidump_write_blob_stream(c, stream_type, buffer->data, buffer->size);
 }
 
 static int append_concat_string(struct context *c, size_t *offset, size_t *size, ...) {
@@ -1193,7 +1195,7 @@ finish:
         return r;
 }
 
-static int write_system_info_stream(struct context *c) {
+static int minidump_write_system_info_stream(struct context *c) {
         struct minidump_system_info i;
         long l;
         struct utsname u;
@@ -1254,13 +1256,13 @@ static int write_system_info_stream(struct context *c) {
         /* FIXME: i.build_number = 1 */
         /* FIXME: i.cpu.x86_cpu_info = CPUID... */
 
-        return write_blob_stream(c, MINIDUMP_SYSTEM_INFO_STREAM, &i, sizeof(i));
+        return minidump_write_blob_stream(c, MINIDUMP_SYSTEM_INFO_STREAM, &i, sizeof(i));
 }
 
 #ifdef __x86_64
 #define minidump_context minidump_context_amd64
 
-static void fill_context(struct minidump_context_amd64 *context, struct thread_info *t) {
+static void minidump_fill_context(struct minidump_context_amd64 *context, struct thread_info *t) {
         assert(context);
         assert(t);
 
@@ -1312,7 +1314,7 @@ static void fill_context(struct minidump_context_amd64 *context, struct thread_i
 #error "I need porting"
 #endif
 
-static int write_thread_list_stream(struct context *c) {
+static int minidump_write_thread_list_stream(struct context *c) {
         struct minidump_thread_list *h;
         unsigned i;
         size_t l;
@@ -1333,7 +1335,7 @@ static int write_thread_list_stream(struct context *c) {
                 a = c->threads + i;
                 b = h->threads + i;
 
-                fill_context(&context, a);
+                minidump_fill_context(&context, a);
                 r = append_bytes(c, &context, sizeof(context), &offset);
                 if (r < 0)
                         return r;
@@ -1351,10 +1353,10 @@ static int write_thread_list_stream(struct context *c) {
                 }
         }
 
-        return write_blob_stream(c, MINIDUMP_THREAD_LIST_STREAM, h, l);
+        return minidump_write_blob_stream(c, MINIDUMP_THREAD_LIST_STREAM, h, l);
 }
 
-static int write_module_list_stream(struct context *c) {
+static int minidump_write_module_list_stream(struct context *c) {
         struct minidump_module_list *h;
         unsigned i;
         size_t l;
@@ -1380,7 +1382,7 @@ static int write_module_list_stream(struct context *c) {
                 b->size_of_image = htole32(a->extent.size);
 
                 if (a->name) {
-                        r = write_string(c, a->name, &offset);
+                        r = minidump_write_string(c, a->name, &offset);
                         if (r < 0)
                                 return r;
 
@@ -1390,10 +1392,10 @@ static int write_module_list_stream(struct context *c) {
                 /* FIXME: we should fill in a lot more here */
         }
 
-        return write_blob_stream(c, MINIDUMP_MODULE_LIST_STREAM, h, l);
+        return minidump_write_blob_stream(c, MINIDUMP_MODULE_LIST_STREAM, h, l);
 }
 
-static int write_memory_list_stream(struct context *c) {
+static int minidump_write_memory_list_stream(struct context *c) {
         struct minidump_memory_list *h;
         unsigned i;
         size_t l;
@@ -1431,16 +1433,18 @@ static int write_memory_list_stream(struct context *c) {
                 a->minidump_offset = offset;
         }
 
-        return write_blob_stream(c, MINIDUMP_MEMORY_LIST_STREAM, h, l);
+        return minidump_write_blob_stream(c, MINIDUMP_MEMORY_LIST_STREAM, h, l);
 }
 
-static int write_exception_stream(struct context *c) {
+static int minidump_write_exception_stream(struct context *c) {
         assert(c);
+
+        /* FIXME */
 
         return 0;
 }
 
-static int write_directory(struct context *c) {
+static int minidump_write_directory(struct context *c) {
         size_t offset;
         struct minidump_header *h;
         int r;
@@ -1475,76 +1479,76 @@ static int write_minidump(struct context *c) {
         if (r < 0)
                 return r;
 
-        r = write_memory_list_stream(c);
+        r = minidump_write_memory_list_stream(c);
         if (r < 0)
                 return r;
 
-        r = write_thread_list_stream(c);
+        r = minidump_write_thread_list_stream(c);
         if (r < 0)
                 return r;
 
-        r = write_module_list_stream(c);
+        r = minidump_write_module_list_stream(c);
         if (r < 0)
                 return r;
 
-        r = write_exception_stream(c);
+        r = minidump_write_exception_stream(c);
         if (r < 0)
                 return r;
 
-        r = write_system_info_stream(c);
+        r = minidump_write_system_info_stream(c);
         if (r < 0)
                 return r;
 
-        r = write_buffer_stream(c, MINIDUMP_LINUX_MAPS, &c->proc_maps);
+        r = minidump_write_buffer_stream(c, MINIDUMP_LINUX_MAPS, &c->proc_maps);
         if (r < 0)
                 return r;
 
-        r = write_buffer_stream(c, MINIDUMP_LINUX_PROC_STATUS, &c->proc_status);
+        r = minidump_write_buffer_stream(c, MINIDUMP_LINUX_PROC_STATUS, &c->proc_status);
         if (r < 0)
                 return r;
 
-        r = write_buffer_stream(c, MINIDUMP_LINUX_ENVIRON, &c->proc_environ);
+        r = minidump_write_buffer_stream(c, MINIDUMP_LINUX_ENVIRON, &c->proc_environ);
         if (r < 0)
                 return r;
 
-        r = write_buffer_stream(c, MINIDUMP_LINUX_CMD_LINE, &c->proc_cmdline);
+        r = minidump_write_buffer_stream(c, MINIDUMP_LINUX_CMD_LINE, &c->proc_cmdline);
         if (r < 0)
                 return r;
 
-        r = write_buffer_stream(c, MINIDUMP_LINUX_COMM, &c->proc_comm);
+        r = minidump_write_buffer_stream(c, MINIDUMP_LINUX_COMM, &c->proc_comm);
         if (r < 0)
                 return r;
 
-        r = write_buffer_stream(c, MINIDUMP_LINUX_ATTR_CURRENT, &c->proc_attr_current);
+        r = minidump_write_buffer_stream(c, MINIDUMP_LINUX_ATTR_CURRENT, &c->proc_attr_current);
         if (r < 0)
                 return r;
 
-        r = write_buffer_stream(c, MINIDUMP_LINUX_EXE, &c->proc_exe);
+        r = minidump_write_buffer_stream(c, MINIDUMP_LINUX_EXE, &c->proc_exe);
         if (r < 0)
                 return r;
 
-        r = write_buffer_stream(c, MINIDUMP_LINUX_CPU_INFO, &c->proc_cpuinfo);
+        r = minidump_write_buffer_stream(c, MINIDUMP_LINUX_CPU_INFO, &c->proc_cpuinfo);
         if (r < 0)
                 return r;
 
-        r = write_buffer_stream(c, MINIDUMP_LINUX_LSB_RELEASE, &c->lsb_release);
+        r = minidump_write_buffer_stream(c, MINIDUMP_LINUX_LSB_RELEASE, &c->lsb_release);
         if (r < 0)
                 return r;
 
-        r = write_buffer_stream(c, MINIDUMP_LINUX_OS_RELEASE, &c->os_release);
+        r = minidump_write_buffer_stream(c, MINIDUMP_LINUX_OS_RELEASE, &c->os_release);
         if (r < 0)
                 return r;
 
-        r = write_buffer_stream(c, MINIDUMP_LINUX_AUXV, &c->auxv);
+        r = minidump_write_buffer_stream(c, MINIDUMP_LINUX_AUXV, &c->auxv);
         if (r < 0)
                 return r;
 
         if (HAVE_COREDUMP(c)) {
-                r = write_blob_stream(c, MINIDUMP_LINUX_PRPSINFO, &c->prpsinfo, sizeof(c->prpsinfo));
+                r = minidump_write_blob_stream(c, MINIDUMP_LINUX_PRPSINFO, &c->prpsinfo, sizeof(c->prpsinfo));
                 if (r < 0)
                         return r;
 
-                r = write_blob_stream(c, MINIDUMP_LINUX_CORE_EHDR, &c->header, sizeof(c->header));
+                r = minidump_write_blob_stream(c, MINIDUMP_LINUX_CORE_EHDR, &c->header, sizeof(c->header));
                 if (r < 0)
                         return r;
         }
@@ -1552,7 +1556,7 @@ static int write_minidump(struct context *c) {
         /* We probably should find __abort_msg and __glib_assert_msg
          * and include it here */
 
-        r = write_directory(c);
+        r = minidump_write_directory(c);
         if (r < 0)
                 return r;
 
