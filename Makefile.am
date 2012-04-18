@@ -80,10 +80,10 @@ segfault_CFLAGS = \
 	$(AM_CFLAGS) \
 	-pthread
 
-noinst_DATE = core
+noinst_DATA = core
 
 core: segfault
-	$( ./segfault ||:) > /dev/null 2>&1
+	( ./segfault ||:) > /dev/null 2>&1
 
 EXTRA_DIST = \
 	libminidump.sym
