@@ -1,5 +1,7 @@
 core
 core.*
+*.core
+*.dmp
 *.o
 segfault
 mkminidump
