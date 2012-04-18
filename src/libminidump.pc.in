@@ -11,7 +11,7 @@ libdir=@libdir@
 includedir=@includedir@
 
 Name: libminidump
-Description: Minidump and Minicore Library
+Description: Minidump and Minicore Generator Library
 URL: @PACKAGE_URL@
 Version: @PACKAGE_VERSION@
 Libs: -L${libdir} -lminidump

@@ -1,7 +1,5 @@
 Now:
 
-- implement ELF coredump generator
-
 - implement minidump parser
 
 - additional CPUID sysinfo stream fields
