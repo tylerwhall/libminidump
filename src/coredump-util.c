@@ -43,43 +43,43 @@ int coredump_read_header(int fd, ElfW(Ehdr) *header) {
                 return -EIO;
 
         if (memcmp(header->e_ident, ELFMAG, SELFMAG) != 0)
-                return -EINVAL;
+                return -EBADMSG;
 
         if (header->e_type != ET_CORE)
-                return -EINVAL;
+                return -EBADMSG;
 
         if (header->e_ehsize != sizeof(ElfW(Ehdr)))
-                return -EINVAL;
+                return -EBADMSG;
 
         if (header->e_phentsize != sizeof(ElfW(Phdr)))
-                return -EINVAL;
+                return -EBADMSG;
 
 #if __WORDSIZE == 32
         if (header->e_ident[EI_CLASS] != ELFCLASS32)
-                return -EINVAL;
+                return -EBADMSG;
 #elif __WORDSIZE == 64
         if (header->e_ident[EI_CLASS] != ELFCLASS64)
-                return -EINVAL;
+                return -EBADMSG;
 #else
 #error "Unknown word size."
 #endif
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
         if (header->e_ident[EI_DATA] != ELFDATA2LSB)
-                return -EINVAL;
+                return -EBADMSG;
 #elif __BYTE_ORDER == __BIG_ENDIAN
         if (header->e_ident[EI_DATA] != ELFDATA2MSB)
-                return -EINVAL;
+                return -EBADMSG;
 #else
 #error "Unknown endianess."
 #endif
 
 #if defined(__i386)
         if (header->e_machine != EM_386)
-                return -EINVAL;
+                return -EBADMSG;
 #elif defined(__x86_64)
         if (header->e_machine != EM_X86_64)
-                return -EINVAL;
+                return -EBADMSG;
 #else
 #error "Unknown machine."
 #endif

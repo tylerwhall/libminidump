@@ -27,17 +27,6 @@
 #include "context.h"
 #include "read-minidump.h"
 
-int minidump_read_memory(struct context *c, unsigned long source, void *destination, size_t length) {
-        assert(c);
-        assert(destination);
-        assert(length > 0);
-        assert(CONTEXT_HAVE_MINIDUMP(c));
-
-        /* FIXME */
-
-        return -ENOTSUP;
-}
-
 int minidump_read_header(struct context *c) {
         ssize_t l;
 
@@ -51,11 +40,22 @@ int minidump_read_header(struct context *c) {
                 return -EIO;
 
         if (c->minidump_header.signature != htole32(0x504d444d))
-                return -EINVAL;
+                return -EBADMSG;
 
         c->have_minidump_header = true;
 
         return 0;
+}
+
+int minidump_read_memory(struct context *c, unsigned long source, void *destination, size_t length) {
+        assert(c);
+        assert(destination);
+        assert(length > 0);
+        assert(CONTEXT_HAVE_MINIDUMP(c));
+
+        /* FIXME */
+
+        return -ENOTSUP;
 }
 
 int minidump_read_threads(struct context *c) {

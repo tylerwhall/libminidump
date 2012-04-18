@@ -253,7 +253,7 @@ int main(int argc, char *argv[]) {
 
                 if (arg_minicore) {
                         r = minidump_to_minicore(fd, &buffer, &buffer_size);
-                        if (r == -EINVAL)
+                        if (r == -EBADMSG)
                                 r = minicore_make(0, fd, &buffer, &buffer_size);
 
                         if (r < 0) {
@@ -281,7 +281,7 @@ int main(int argc, char *argv[]) {
                 if (!arg_minidump && !arg_minicore) {
 
                         r = minidump_show(stdout, fd);
-                        if (r == -EINVAL)
+                        if (r == -EBADMSG)
                                 r = coredump_show(stdout, 0, fd);
 
                         if (r < 0) {
