@@ -23,7 +23,7 @@ AC_INIT([libminidump],
         [libminidump],
         [http://www.freedesktop.org/wiki/Software/libminidump])
 
-AC_CONFIG_SRCDIR([minidump.c])
+AC_CONFIG_SRCDIR([context.c])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_AUX_DIR([build-aux])
@@ -35,6 +35,8 @@ AM_SILENT_RULES([yes])
 
 LT_PREREQ(2.2)
 LT_INIT
+
+AC_PROG_SED
 
 AC_PROG_CC
 AC_PROG_CC_C99

@@ -28,6 +28,8 @@ AM_CPPFLAGS = \
 
 AM_CFLAGS = $(WARNINGFLAGS)
 
+pkgconfiglibdir=$(libdir)/pkgconfig
+
 lib_LTLIBRARIES = \
 	libminidump.la
 
@@ -83,14 +85,35 @@ segfault_CFLAGS = \
 	$(AM_CFLAGS) \
 	-pthread
 
-noinst_DATA = core
+noinst_DATA = \
+	core
 
 core: segfault
-	( ./segfault ||:) > /dev/null 2>&1
+	$(AM_V_GEN)( ./segfault ||:) > /dev/null 2>&1
+
+pkgconfiglib_DATA= \
+	libminidump.pc
 
 EXTRA_DIST = \
-	libminidump.sym
+	libminidump.sym \
+	libminidump.pc.in
+
+SED_PROCESS = \
+	$(AM_V_GEN)$(MKDIR_P) $(dir $@) && \
+	$(SED)	-e 's,@PACKAGE_VERSION\@,$(PACKAGE_VERSION),g' \
+		-e 's,@PACKAGE_NAME\@,$(PACKAGE_NAME),g' \
+		-e 's,@PACKAGE_URL\@,$(PACKAGE_URL),g' \
+		-e 's,@prefix\@,$(prefix),g' \
+		-e 's,@exec_prefix\@,$(exec_prefix),g' \
+		-e 's,@libdir\@,$(libdir),g' \
+		-e 's,@includedir\@,$(includedir),g' \
+		-e 's,@VERSION\@,$(VERSION),g' \
+		< $< > $@ || rm $@
+
+%.pc: %.pc.in Makefile
+	$(SED_PROCESS)
 
 CLEAN_FILES = \
 	core.* \
-	core
+	core \
+	$(pkgconfiglib_DATA)
