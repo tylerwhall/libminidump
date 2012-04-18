@@ -31,10 +31,10 @@
 
 #include "minidump.h"
 
-static char *arg_source = NULL;
+static const char *arg_source = NULL;
 static pid_t arg_pid = 0;
-static char *arg_minidump = NULL;
-static char *arg_minicore = NULL;
+static const char *arg_minidump = NULL;
+static const char *arg_minicore = NULL;
 
 static int help(void) {
 

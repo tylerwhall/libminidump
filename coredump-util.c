@@ -74,10 +74,10 @@ int coredump_read_header(int fd, ElfW(Ehdr) *header) {
 #error "Unknown endianess."
 #endif
 
-#if __i386
+#if defined(__i386)
         if (header->e_machine != EM_386)
                 return -EINVAL;
-#elif __x86_64
+#elif defined(__x86_64)
         if (header->e_machine != EM_X86_64)
                 return -EINVAL;
 #else

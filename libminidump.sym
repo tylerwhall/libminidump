@@ -1,0 +1,21 @@
+/***
+  This file is part of libminidump.
+
+  libminidump is free software; you can redistribute it and/or modify it
+  under the terms of the GNU Lesser General Public License as published by
+  the Free Software Foundation; either version 2.1 of the License, or
+  (at your option) any later version.
+***/
+
+/* Original symbols from libminidump v1 */
+
+LIBMINIDUMP_1 {
+global:
+        minidump_make;
+        minicore_make;
+        minidump_show;
+        coredump_show;
+        minidump_to_minicore;
+local:
+        *;
+};

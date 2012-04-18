@@ -339,9 +339,9 @@ int minicore_write(struct context *c) {
         h.e_ident[EI_VERSION] = EV_CURRENT;
         h.e_ident[EI_OSABI] = ELFOSABI_NONE;
 
-#if __i386
+#if defined(__i386)
         h.e_machine = EM_386;
-#elif __x86_64
+#elif defined(__x86_64)
         h.e_machine = EM_X86_64;
 #else
 #error "Unknown machine."

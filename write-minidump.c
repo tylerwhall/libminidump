@@ -30,6 +30,7 @@
 #include <time.h>
 
 #include "context.h"
+#include "write-minidump.h"
 
 static int minidump_write_string(struct context *c, const char *s, size_t *offset) {
         size_t n, l;

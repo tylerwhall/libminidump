@@ -685,10 +685,12 @@ finish:
         return r;
 }
 
+__attribute__ ((visibility("default")))
 int minidump_make(pid_t pid, int fd, void **minidump, size_t *size) {
         return make(pid, fd, minidump, size, minidump_write);
 }
 
+__attribute__ ((visibility("default")))
 int minicore_make(pid_t pid, int fd, void **minicore, size_t *size) {
         return make(pid, fd, minicore, size, minicore_write);
 }
@@ -720,14 +722,17 @@ finish:
         return r;
 }
 
+__attribute__ ((visibility("default")))
 int minidump_show(FILE *f, int minidump_fd) {
         return show(f, 0, -1, minidump_fd);
 }
 
+__attribute__ ((visibility("default")))
 int coredump_show(FILE *f, pid_t pid, int coredump_fd) {
         return show(f, pid, coredump_fd, -1);
 }
 
+__attribute__ ((visibility("default")))
 int minidump_to_minicore(int minidump_fd, void **output, size_t *output_size) {
         struct context c;
         int r;
