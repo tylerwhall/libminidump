@@ -233,8 +233,11 @@ int main(int argc, char *argv[]) {
 
                 if (arg_minicore) {
                         r = minidump_to_minicore(fd, &buffer, &buffer_size);
+                        if (r == -EINVAL)
+                                r = minicore_make(0, fd, &buffer, &buffer_size);
+
                         if (r < 0) {
-                                fprintf(stderr, "Failed to convert minidump: %s\n", strerror(-r));
+                                fprintf(stderr, "Failed to convert to minicore: %s\n", strerror(-r));
                                 goto finish;
                         }
 
@@ -246,7 +249,7 @@ int main(int argc, char *argv[]) {
                 if (arg_minidump) {
                         r = minidump_make(0, fd, &buffer, &buffer_size);
                         if (r < 0) {
-                                fprintf(stderr, "Failed to convert coredump: %s\n", strerror(-r));
+                                fprintf(stderr, "Failed to convert to minidump: %s\n", strerror(-r));
                                 goto finish;
                         }
 
