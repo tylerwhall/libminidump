@@ -183,14 +183,14 @@ int coredump_next_note(int fd, off_t *offset, off_t *length, ElfW(Nhdr) *n, off_
                 return -EIO;
 
         j = sizeof(*n) +
-                roundup(n->n_namesz, sizeof(long)) +
-                roundup(n->n_descsz, sizeof(long));
+                roundup(n->n_namesz, sizeof(int)) +
+                roundup(n->n_descsz, sizeof(int));
 
         if (j > *length)
                 return -EIO;
 
         *name = *offset + sizeof(*n);
-        *descriptor = *offset + sizeof(*n) + roundup(n->n_namesz, sizeof(long));
+        *descriptor = *offset + sizeof(*n) + roundup(n->n_namesz, sizeof(int));
 
         *offset += j;
         *length -= j;

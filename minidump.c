@@ -670,6 +670,8 @@ static int coredump_read_threads(struct context *c) {
 
                 name[l] = 0;
 
+                fprintf(stderr, "Found note %s, type %u\n", name, note.n_type);
+
                 if (strcmp(name, "CORE") == 0 &&
                     note.n_type == NT_PRSTATUS) {
 
@@ -1120,12 +1122,31 @@ static int append_bytes(struct context *c, const void *data, size_t bytes, size_
         int r;
 
         assert(c);
+        assert(data || bytes <= 0);
 
         r = reserve_bytes(c, bytes, &p, offset);
         if (r < 0)
                 return r;
 
-        memcpy(p, data, bytes);
+        if (bytes > 0)
+                memcpy(p, data, bytes);
+
+        return r;
+}
+
+static int null_bytes(struct context *c, size_t bytes, size_t *offset) {
+        void *p;
+        int r;
+
+        assert(c);
+
+        r = reserve_bytes(c, bytes, &p, offset);
+        if (r < 0)
+                return r;
+
+        if (bytes > 0)
+                memset(p, 0, bytes);
+
         return r;
 }
 
@@ -1711,8 +1732,10 @@ static int minicore_write_one_note(struct context *c, const char *name, ElfW(Wor
 
         assert(c);
         assert(name);
-        assert(data);
-        assert(length > 0);
+        assert(data || length <= 0);
+
+        if (length <= 0)
+                return 0;
 
         memset(&nh, 0, sizeof(nh));
         nh.n_namesz = strlen(name);
@@ -1727,7 +1750,15 @@ static int minicore_write_one_note(struct context *c, const char *name, ElfW(Wor
         if (r < 0)
                 return r;
 
-        r = append_bytes(c, data, length, NULL);
+        r = null_bytes(c, roundup(nh.n_namesz, sizeof(int)) - nh.n_namesz, NULL);
+        if (r < 0)
+                return r;
+
+        r = append_bytes(c, data, nh.n_descsz, NULL);
+        if (r < 0)
+                return r;
+
+        r = null_bytes(c, roundup(nh.n_descsz, sizeof(int)) - nh.n_descsz, NULL);
         if (r < 0)
                 return r;
 
@@ -1819,6 +1850,56 @@ static int minicore_write_notes_for_thread(struct context *c, unsigned i) {
         return 0;
 }
 
+static int minicore_write_meta_notes(struct context *c) {
+        int r;
+
+        assert(c);
+
+        /* We use the same type identifiers as the minidump logic */
+
+        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_MAPS, c->proc_maps.data, c->proc_maps.size);
+        if (r < 0)
+                return r;
+
+        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_PROC_STATUS, c->proc_status.data, c->proc_status.size);
+        if (r < 0)
+                return r;
+
+        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_ENVIRON, c->proc_environ.data, c->proc_environ.size);
+        if (r < 0)
+                return r;
+
+        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_CMD_LINE, c->proc_cmdline.data, c->proc_cmdline.size);
+        if (r < 0)
+                return r;
+
+        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_COMM, c->proc_comm.data, c->proc_comm.size);
+        if (r < 0)
+                return r;
+
+        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_ATTR_CURRENT, c->proc_attr_current.data, c->proc_attr_current.size);
+        if (r < 0)
+                return r;
+
+        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_ENVIRON, c->proc_exe.data, c->proc_exe.size);
+        if (r < 0)
+                return r;
+
+        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_CPU_INFO, c->proc_cpuinfo.data, c->proc_cpuinfo.size);
+        if (r < 0)
+                return r;
+
+        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_LSB_RELEASE, c->lsb_release.data, c->lsb_release.size);
+        if (r < 0)
+                return r;
+
+        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_OS_RELEASE, c->os_release.data, c->os_release.size);
+        if (r < 0)
+                return r;
+
+        return 0;
+}
+
 static int minicore_write_notes(struct context *c) {
         ElfW(Phdr) ph;
         unsigned i;
@@ -1835,6 +1916,10 @@ static int minicore_write_notes(struct context *c) {
                 if (r < 0)
                         return r;
         }
+
+        r = minicore_write_meta_notes(c);
+        if (r < 0)
+                return r;
 
         memset(&ph, 0, sizeof(ph));
         ph.p_type = PT_NOTE;
