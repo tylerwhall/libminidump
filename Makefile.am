@@ -34,24 +34,24 @@ lib_LTLIBRARIES = \
 	libminidump.la
 
 libminidump_la_SOURCES = \
-	minidump.h \
-	format.h \
-	context.h \
-	context.c \
-	read-coredump.h \
-	read-coredump.c \
-	read-minidump.h \
-	read-minidump.c \
-	read-process.h \
-	read-process.c \
-	write-minicore.h \
-	write-minicore.c \
-	write-minidump.h \
-	write-minidump.c \
-	coredump-util.h \
-	coredump-util.c \
-	util.h \
-	util.c
+	src/minidump.h \
+	src/format.h \
+	src/context.h \
+	src/context.c \
+	src/read-coredump.h \
+	src/read-coredump.c \
+	src/read-minidump.h \
+	src/read-minidump.c \
+	src/read-process.h \
+	src/read-process.c \
+	src/write-minicore.h \
+	src/write-minicore.c \
+	src/write-minidump.h \
+	src/write-minidump.c \
+	src/coredump-util.h \
+	src/coredump-util.c \
+	src/util.h \
+	src/util.c
 
 libminidump_la_CFLAGS = \
 	$(AM_CFLAGS) \
@@ -64,13 +64,13 @@ libminidump_la_LDFLAGS = \
 	-Wl,--version-script=$(top_srcdir)/libminidump.sym
 
 include_HEADERS = \
-	minidump.h
+	src/minidump.h
 
 bin_PROGRAMS = \
 	mkminidump
 
 mkminidump_SOURCES = \
-	mkminidump.c
+	src/mkminidump.c
 
 mkminidump_LDADD = \
 	libminidump.la
@@ -79,7 +79,7 @@ noinst_PROGRAMS = \
 	segfault
 
 segfault_SOURCES = \
-	segfault.c
+	src/segfault.c
 
 segfault_CFLAGS = \
 	$(AM_CFLAGS) \

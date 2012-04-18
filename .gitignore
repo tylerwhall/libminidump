@@ -24,3 +24,4 @@ Makefile
 /libtool
 /libminidump-*.tar.xz
 /libminidump.pc
+.dirstamp
