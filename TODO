@@ -1,0 +1,17 @@
+Now:
+
+- implement ELF coredump generator
+
+- implement minidump parser
+
+- additional CPUID sysinfo stream fields
+
+- parse thread name
+
+- build id logic
+
+Later:
+
+- Proper UTF8-to-UTF16 encoder
+
+- Possibly, full coredump generator, in addition to the existing minicore generator
