@@ -28,6 +28,8 @@
 #define CODE_SAVE_SIZE 256
 #define STACK_SAVE_SIZE (32*1024)
 
+#define NOTE_SIZE_MAX (1024*1024*10)
+
 struct buffer {
         char *data;
         size_t size;
@@ -662,6 +664,9 @@ static int coredump_read_threads(struct context *c) {
                 if (note.n_namesz >= sizeof(name))
                         continue;
 
+                if (note.n_descsz >= NOTE_SIZE_MAX)
+                        return -EBADMSG;
+
                 l = pread(c->coredump_fd, name, note.n_namesz, name_offset);
                 if (l < 0)
                         return -errno;
@@ -766,6 +771,67 @@ static int coredump_read_threads(struct context *c) {
                         if (l != sizeof(i.fpxregs))
                                 return -EIO;
 #endif
+                } else if (strcmp(name, "LENNART") == 0) {
+                        struct buffer *b;
+
+                        switch (note.n_type) {
+
+                        case MINIDUMP_LINUX_MAPS:
+                                b = &c->proc_maps;
+                                break;
+                        case MINIDUMP_LINUX_PROC_STATUS:
+                                b = &c->proc_status;
+                                break;
+                        case MINIDUMP_LINUX_ENVIRON:
+                                b = &c->proc_environ;
+                                break;
+                        case MINIDUMP_LINUX_CMD_LINE:
+                                b = &c->proc_cmdline;
+                                break;
+                        case MINIDUMP_LINUX_COMM:
+                                b = &c->proc_comm;
+                                break;
+                        case MINIDUMP_LINUX_ATTR_CURRENT:
+                                b = &c->proc_attr_current;
+                                break;
+                        case MINIDUMP_LINUX_EXE:
+                                b = &c->proc_exe;
+                                break;
+                        case MINIDUMP_LINUX_CPU_INFO:
+                                b = &c->proc_cpuinfo;
+                                break;
+                        case MINIDUMP_LINUX_LSB_RELEASE:
+                                b = &c->lsb_release;
+                                break;
+                        case MINIDUMP_LINUX_OS_RELEASE:
+                                b = &c->os_release;
+                                break;
+                        default:
+                                b = NULL;
+                                break;
+                        }
+
+                        if (b) {
+                                void *p;
+
+                                p = malloc(note.n_descsz);
+                                if (!p)
+                                        return -ENOMEM;
+
+                                l = pread(c->coredump_fd, p, note.n_descsz, descriptor_offset);
+                                if (l < 0) {
+                                        free(p);
+                                        return -errno;
+                                }
+                                if (l != note.n_descsz) {
+                                        free(p);
+                                        return -EIO;
+                                }
+
+                                free(b->data);
+                                b->data = p;
+                                b->size = note.n_descsz;
+                        }
                 }
         }
 
@@ -1881,7 +1947,7 @@ static int minicore_write_meta_notes(struct context *c) {
         if (r < 0)
                 return r;
 
-        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_ENVIRON, c->proc_exe.data, c->proc_exe.size);
+        r = minicore_write_one_note(c, "LENNART", MINIDUMP_LINUX_EXE, c->proc_exe.data, c->proc_exe.size);
         if (r < 0)
                 return r;
 
