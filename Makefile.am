@@ -61,6 +61,9 @@ libminidump_la_LDFLAGS = \
 	-version-info $(LIBMINIDUMP_CURRENT):$(LIBMINIDUMP_REVISION):$(LIBMINIDUMP_AGE) \
 	-Wl,--version-script=$(top_srcdir)/libminidump.sym
 
+include_HEADERS = \
+	minidump.h
+
 bin_PROGRAMS = \
 	mkminidump
 
