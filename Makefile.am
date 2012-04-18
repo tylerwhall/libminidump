@@ -61,7 +61,7 @@ libminidump_la_LDFLAGS = \
 	$(AM_LDFLAGS) \
 	-shared \
 	-version-info $(LIBMINIDUMP_CURRENT):$(LIBMINIDUMP_REVISION):$(LIBMINIDUMP_AGE) \
-	-Wl,--version-script=$(top_srcdir)/libminidump.sym
+	-Wl,--version-script=$(top_srcdir)/src/libminidump.sym
 
 include_HEADERS = \
 	src/minidump.h
@@ -95,8 +95,9 @@ pkgconfiglib_DATA= \
 	libminidump.pc
 
 EXTRA_DIST = \
-	libminidump.sym \
-	libminidump.pc.in
+	src/libminidump.sym \
+	src/libminidump.pc.in \
+	src/Makefile
 
 SED_PROCESS = \
 	$(AM_V_GEN)$(MKDIR_P) $(dir $@) && \
@@ -110,10 +111,10 @@ SED_PROCESS = \
 		-e 's,@VERSION\@,$(VERSION),g' \
 		< $< > $@ || rm $@
 
-%.pc: %.pc.in Makefile
+%.pc: src/%.pc.in Makefile
 	$(SED_PROCESS)
 
-CLEAN_FILES = \
+CLEANFILES = \
 	core.* \
 	core \
 	$(pkgconfiglib_DATA)

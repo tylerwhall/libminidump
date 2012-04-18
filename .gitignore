@@ -15,7 +15,7 @@ stamp-*
 /segfault
 /mkminidump
 Makefile.in
-Makefile
+/Makefile
 /aclocal.m4
 /config.h
 /config.h.in
