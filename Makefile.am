@@ -33,7 +33,9 @@ lib_LTLIBRARIES = \
 
 libminidump_la_SOURCES = \
 	minidump.h \
-	minidump.c \
+	format.h \
+	context.h \
+	context.c \
 	read-coredump.h \
 	read-coredump.c \
 	read-minidump.h \
@@ -47,9 +49,7 @@ libminidump_la_SOURCES = \
 	coredump-util.h \
 	coredump-util.c \
 	util.h \
-	util.c \
-	context.h \
-	format.h
+	util.c
 
 libminidump_la_CFLAGS = \
 	$(AM_CFLAGS) \
