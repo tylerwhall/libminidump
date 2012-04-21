@@ -215,10 +215,16 @@ static int ptrace_copy(enum __ptrace_request req, pid_t pid, unsigned long sourc
 }
 
 int process_read_memory(struct context *c, unsigned long source, void *destination, size_t length) {
+        int r;
+
         assert(c);
         assert(CONTEXT_HAVE_PROCESS(c));
 
-        return ptrace_copy(PTRACE_PEEKDATA, c->pid, source, destination, length);
+        r = ptrace_copy(PTRACE_PEEKDATA, c->pid, source, destination, length);
+        if (r < 0)
+                return r;
+
+        return 1;
 }
 
 static int proc_read_buffer(const char *path, struct buffer *b) {

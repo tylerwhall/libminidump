@@ -8,8 +8,12 @@ Now:
 
 - build id logic
 
+- include cgroup membership
+
 Later:
 
 - Proper UTF8-to-UTF16 encoder
 
 - Possibly, full coredump generator, in addition to the existing minicore generator
+
+- some code to find __abort_msg

@@ -24,8 +24,12 @@
 ***/
 
 #include <sys/types.h>
+#include <stdbool.h>
 
 void* memdup(const void *p, size_t l);
+
 int read_full_file(const char *path, void **_buffer, size_t *_size);
+
+#define yes_no(b) ((b) ? "yes" : "no")
 
 #endif

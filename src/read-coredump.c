@@ -173,63 +173,11 @@ int coredump_read_threads(struct context *c) {
                 } else if (strcmp(name, "LENNART") == 0) {
                         struct buffer *b;
 
-                        switch (note.n_type) {
-
-                        case MINIDUMP_LINUX_MAPS:
-                                b = &c->proc_maps;
-                                break;
-                        case MINIDUMP_LINUX_PROC_STATUS:
-                                b = &c->proc_status;
-                                break;
-                        case MINIDUMP_LINUX_ENVIRON:
-                                b = &c->proc_environ;
-                                break;
-                        case MINIDUMP_LINUX_CMD_LINE:
-                                b = &c->proc_cmdline;
-                                break;
-                        case MINIDUMP_LINUX_COMM:
-                                b = &c->proc_comm;
-                                break;
-                        case MINIDUMP_LINUX_ATTR_CURRENT:
-                                b = &c->proc_attr_current;
-                                break;
-                        case MINIDUMP_LINUX_EXE:
-                                b = &c->proc_exe;
-                                break;
-                        case MINIDUMP_LINUX_CPU_INFO:
-                                b = &c->proc_cpuinfo;
-                                break;
-                        case MINIDUMP_LINUX_LSB_RELEASE:
-                                b = &c->lsb_release;
-                                break;
-                        case MINIDUMP_LINUX_OS_RELEASE:
-                                b = &c->os_release;
-                                break;
-                        default:
-                                b = NULL;
-                                break;
-                        }
-
+                        b = context_find_buffer(c, note.n_type);
                         if (b) {
-                                void *p;
-
-                                p = malloc(note.n_descsz);
-                                if (!p)
-                                        return -ENOMEM;
-
-                                l = pread(c->coredump_fd, p, note.n_descsz, descriptor_offset);
-                                if (l < 0) {
-                                        free(p);
-                                        return -errno;
-                                }
-                                if (l != note.n_descsz) {
-                                        free(p);
-                                        return -EIO;
-                                }
-
-                                free(b->data);
-                                b->data = p;
-                                b->size = note.n_descsz;
+                                r = context_pread_buffer(c->coredump_fd, b, note.n_descsz, descriptor_offset);
+                                if (r < 0)
+                                        return r;
                         }
                 }
         }

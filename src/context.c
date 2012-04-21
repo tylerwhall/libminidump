@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <string.h>
 #include <stdarg.h>
+#include <unistd.h>
 
 #include "minidump.h"
 #include "format.h"
@@ -36,6 +37,7 @@
 #include "read-process.h"
 #include "write-minidump.h"
 #include "write-minicore.h"
+#include "util.h"
 
 int context_read_memory(struct context *c, unsigned long source, void *destination, size_t length) {
         int r;
@@ -422,6 +424,48 @@ finish:
         return r;
 }
 
+struct buffer *context_find_buffer(struct context *c, unsigned type) {
+        assert(c);
+
+        switch (type) {
+
+        case MINIDUMP_LINUX_MAPS:
+                return &c->proc_maps;
+
+        case MINIDUMP_LINUX_PROC_STATUS:
+                return &c->proc_status;
+
+        case MINIDUMP_LINUX_ENVIRON:
+                return &c->proc_environ;
+
+        case MINIDUMP_LINUX_CMD_LINE:
+                return &c->proc_cmdline;
+
+        case MINIDUMP_LINUX_COMM:
+                return &c->proc_comm;
+
+        case MINIDUMP_LINUX_ATTR_CURRENT:
+                return &c->proc_attr_current;
+
+        case MINIDUMP_LINUX_EXE:
+                return &c->proc_exe;
+
+        case MINIDUMP_LINUX_CPU_INFO:
+                return &c->proc_cpuinfo;
+
+        case MINIDUMP_LINUX_LSB_RELEASE:
+                return &c->lsb_release;
+
+        case MINIDUMP_LINUX_OS_RELEASE:
+                return &c->os_release;
+
+        case MINIDUMP_LINUX_AUXV:
+                return &c->auxv;
+        }
+
+        return NULL;
+}
+
 static int show_buffer(FILE *f, const char *title, struct buffer *b) {
         char *p;
 
@@ -497,7 +541,16 @@ void context_show(FILE *f, struct context *c) {
         assert(f);
         assert(c);
 
-        fputs("-- Available Maps\n", f);
+        fprintf(f,
+                "-- Source\n"
+                "Have Process: %s\n"
+                "Have Coredump: %s\n"
+                "Have Minidump: %s\n"
+                "-- Available Maps\n",
+                yes_no(CONTEXT_HAVE_PROCESS(c)),
+                yes_no(CONTEXT_HAVE_COREDUMP(c)),
+                yes_no(CONTEXT_HAVE_MINIDUMP(c)));
+
         for (i = 0, sum = 0; i < c->n_maps; i++) {
                 map_show(f, i, c->maps + i);
                 sum += c->maps[i].extent.size;
@@ -555,6 +608,10 @@ int context_load(struct context *c) {
                         return r;
 
                 r = minidump_read_threads(c);
+                if (r < 0)
+                        return r;
+
+                r = minidump_read_streams(c);
                 if (r < 0)
                         return r;
         }
@@ -765,4 +822,34 @@ int minidump_to_minicore(int minidump_fd, void **output, size_t *output_size) {
 finish:
         context_release(&c);
         return r;
+}
+
+int context_pread_buffer(int fd, struct buffer *b, size_t length, off_t offset) {
+        void *p;
+        ssize_t l;
+
+        assert(fd >= 0);
+        assert(b);
+        assert(length > 0);
+
+        p = malloc(length);
+        if (!p)
+                return -ENOMEM;
+
+        l = pread(fd, p, length, offset);
+        if (l < 0) {
+                free(p);
+                return -errno;
+        }
+
+        if ((size_t) l != length) {
+                free(p);
+                return -EIO;
+        }
+
+        free(b->data);
+        b->data = p;
+        b->size = length;
+
+        return 0;
 }

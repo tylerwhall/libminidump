@@ -172,7 +172,7 @@ int coredump_read_memory(int fd, const ElfW(Ehdr) *header, unsigned long source,
                         return -EIO;
 
                 l = pread(fd,
-                          (uint8_t*) destination, length,
+                          destination, length,
                           segment.p_offset + (source - segment.p_vaddr));
                 if (l < 0)
                         return -errno;

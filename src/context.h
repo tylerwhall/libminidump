@@ -153,8 +153,12 @@ int context_append_bytes(struct context *c, const void *data, size_t bytes, size
 int context_null_bytes(struct context *c, size_t bytes, size_t *offset);
 int context_append_concat_string(struct context *c, size_t *offset, size_t *size, ...);
 
+struct buffer *context_find_buffer(struct context *c, unsigned type);
+
 void context_show(FILE *f, struct context *c);
 int context_load(struct context *c);
 void context_release(struct context *c);
+
+int context_pread_buffer(int fd, struct buffer *b, size_t length, off_t offset);
 
 #endif

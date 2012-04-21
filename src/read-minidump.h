@@ -29,5 +29,6 @@ int minidump_read_header(struct context *c);
 int minidump_read_threads(struct context *c);
 int minidump_read_maps(struct context *c);
 int minidump_read_memory(struct context *c, unsigned long source, void *destination, size_t length);
+int minidump_read_streams(struct context *c);
 
 #endif

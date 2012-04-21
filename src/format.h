@@ -52,10 +52,10 @@ enum {
         MINIDUMP_UNUSED_STREAM                = 0,
         MINIDUMP_RESERVED_STREAM_0            = 1,
         MINIDUMP_RESERVED_STREAM_1            = 2,
-        MINIDUMP_THREAD_LIST_STREAM           = 3,           /* TODO XXXX */
-        MINIDUMP_MODULE_LIST_STREAM           = 4,           /* TODO XXXX */
-        MINIDUMP_MEMORY_LIST_STREAM           = 5,           /* TODO XXXX */
-        MINIDUMP_EXCEPTION_STREAM             = 6,           /* TODO XXXX */
+        MINIDUMP_THREAD_LIST_STREAM           = 3,           /* done */
+        MINIDUMP_MODULE_LIST_STREAM           = 4,           /* done */
+        MINIDUMP_MEMORY_LIST_STREAM           = 5,           /* done */
+        MINIDUMP_EXCEPTION_STREAM             = 6,           /* done */
         MINIDUMP_SYSTEM_INFO_STREAM           = 7,           /* done */
         MINIDUMP_THREAD_EX_LIST_STREAM        = 8,
         MINIDUMP_MEMORY_64_LIST_STREAM        = 9,
