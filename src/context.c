@@ -189,7 +189,7 @@ static int pick_maps(struct context *c) {
                         m[0].extent.address = 0;
                 m[0].extent.size = CODE_SAVE_SIZE;
 
-                m[1].extent.address = t->stack_pointer;
+                m[1].extent.address = t->stack_pointer & ~(getpagesize() - 1);
                 m[1].extent.size = STACK_SAVE_SIZE;
         }
 
